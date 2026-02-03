@@ -28,16 +28,16 @@ class LoanController extends Controller
         try {
             /** @var User $user */
             $user = auth()->user();
-            
+
             DB::beginTransaction();
-            
+
             // Create the loan application
             $loan = $this->loanService->createLoanApplication(
                 borrowerId: $user->id,
                 type: $request->input('type'),
-                principalAmount: (float)$request->input('principal_amount'),
-                interestRate: (float)$request->input('interest_rate'),
-                termMonths: (int)$request->input('term_months'),
+                principalAmount: (float) $request->input('principal_amount'),
+                interestRate: (float) $request->input('interest_rate'),
+                termMonths: (int) $request->input('term_months'),
                 purpose: $request->input('purpose'),
                 employmentStatus: $request->input('employment_status'),
             );
@@ -47,34 +47,34 @@ class LoanController extends Controller
                 foreach ($request->input('documents') as $index => $documentData) {
                     $file = $request->file("documents.$index.file");
                     $documentType = $documentData['type'];
-                    
+
                     if ($file && $file->isValid()) {
                         // Get file information BEFORE moving
                         $originalName = $file->getClientOriginalName();
                         $extension = $file->getClientOriginalExtension();
                         $fileSize = $file->getSize();
                         $mimeType = $file->getMimeType();
-                        
+
                         // Generate unique filename
-                        $filename = Str::slug(pathinfo($originalName, PATHINFO_FILENAME)) 
-                            . '_' . time() 
-                            . '_' . Str::random(8) 
-                            . '.' . $extension;
-                        
+                        $filename = Str::slug(pathinfo($originalName, PATHINFO_FILENAME))
+                            .'_'.time()
+                            .'_'.Str::random(8)
+                            .'.'.$extension;
+
                         // Move file to public path
-                        $destinationPath = public_path('documents/loans/' . $loan->id);
-                        
+                        $destinationPath = public_path('documents/loans/'.$loan->id);
+
                         // Create directory if it doesn't exist
-                        if (!file_exists($destinationPath)) {
+                        if (! file_exists($destinationPath)) {
                             mkdir($destinationPath, 0755, true);
                         }
-                        
+
                         // Move the file
                         $file->move($destinationPath, $filename);
-                        
+
                         // Store relative path for database
-                        $filePath = 'documents/loans/' . $loan->id . '/' . $filename;
-                        
+                        $filePath = 'documents/loans/'.$loan->id.'/'.$filename;
+
                         // Create document record using the information we saved BEFORE moving
                         LoanDocument::create([
                             'loan_id' => $loan->id,
@@ -85,7 +85,7 @@ class LoanController extends Controller
                             'mime_type' => $mimeType,
                             'uploaded_by' => $user->id,
                         ]);
-                        
+
                         Log::info('Document uploaded successfully', [
                             'loan_id' => $loan->id,
                             'document_type' => $documentType,
@@ -95,17 +95,17 @@ class LoanController extends Controller
                     }
                 }
             }
-            
+
             DB::commit();
 
             return response()->json([
                 'message' => 'Loan application submitted successfully',
                 'loan' => $loan->load(['borrower', 'documents']),
             ], 201);
-            
+
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             Log::error('Loan application submission failed', [
                 'user_id' => auth()->id(),
                 'error' => $e->getMessage(),
@@ -113,7 +113,7 @@ class LoanController extends Controller
                 'line' => $e->getLine(),
                 'file' => $e->getFile(),
             ]);
-            
+
             return response()->json([
                 'message' => 'Failed to submit loan application',
                 'error' => config('app.debug') ? $e->getMessage() : 'An error occurred',
@@ -141,9 +141,9 @@ class LoanController extends Controller
             if ($user->isAdmin()) {
                 $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents']);
             } elseif ($user->isLender()) {
-                // For lenders, show all loans (or filter by lender_id if assigned)
-                // Since lender_id might be null for pending loans, show all for now
-                $query = Loan::with(['borrower', 'loanOfficer', 'documents']);
+                // Only show loans assigned to this lender
+                $query = Loan::where('lender_id', $user->id)
+                    ->with(['borrower', 'loanOfficer', 'documents']);
             } elseif ($user->isLoanOfficer()) {
                 $query = Loan::where('loan_officer_id', $user->id)
                     ->with(['borrower', 'lender', 'documents']);
@@ -164,7 +164,7 @@ class LoanController extends Controller
             return response()->json([
                 'loans' => $loans,
             ]);
-            
+
         } catch (\Exception $e) {
             Log::error('Error fetching loans', [
                 'user_id' => auth()->id(),
@@ -206,21 +206,31 @@ class LoanController extends Controller
             'interest_rate' => 'sometimes|numeric',
             'notes' => 'sometimes|string',
             'rejection_reason' => 'sometimes|string',
+            'lender_id' => 'sometimes|exists:users,id',
         ]);
 
         /** @var User $user */
         $user = auth()->user();
 
-        // If status is approved, set approval date and lender
-        if (isset($validated['status']) && $validated['status'] === 'approved') {
-            $validated['approved_at'] = now();
-            $validated['lender_id'] = $user->id;
-            $validated['loan_officer_id'] = $user->id;
-        }
+        if (isset($validated['status'])) {
+            if ($validated['status'] === 'approved') {
+                $validated['approved_at'] = now();
 
-        // If status is rejected, set rejection date
-        if (isset($validated['status']) && $validated['status'] === 'rejected') {
-            $validated['rejected_at'] = now();
+                // Assign lender
+                if ($user->isAdmin()) {
+                    // Use the lender from the form if provided
+                    if (isset($validated['lender_id'])) {
+                        $loan->lender_id = $validated['lender_id'];
+                    }
+                } elseif ($user->isLender()) {
+                    // If the approver is the lender itself, assign self
+                    $validated['lender_id'] = $user->id;
+                }
+            }
+
+            if ($validated['status'] === 'rejected') {
+                $validated['rejected_at'] = now();
+            }
         }
 
         $loan->update($validated);
@@ -241,17 +251,21 @@ class LoanController extends Controller
         $validated = $request->validate([
             'approved_amount' => 'required|numeric|min:0',
             'interest_rate' => 'sometimes|numeric|min:0|max:100',
+            'lender_id' => 'sometimes|exists:users,id',
         ]);
 
         /** @var User $user */
         $user = auth()->user();
 
+        // Use the lender_id from the request if provided, otherwise fallback to the authenticated user
+        $lenderId = $validated['lender_id'] ?? $user->id;
+
         $loan = $this->loanService->approveLoan(
             loan: $loan,
-            approvedAmount: (float)$validated['approved_amount'],
-            lenderId: $user->id,
+            approvedAmount: (float) $validated['approved_amount'],
+            lenderId: $lenderId,
             loanOfficerId: $user->id,
-            interestRate: isset($validated['interest_rate']) ? (float)$validated['interest_rate'] : null,
+            interestRate: isset($validated['interest_rate']) ? (float) $validated['interest_rate'] : null,
         );
 
         return response()->json([
@@ -296,7 +310,7 @@ class LoanController extends Controller
             Log::info('Activating loan', [
                 'loan_id' => $loan->id,
                 'loan_number' => $loan->loan_number,
-                'user_id' => auth()->id()
+                'user_id' => auth()->id(),
             ]);
 
             $startDate = $request->input('start_date') ? now()->parse($request->input('start_date')) : null;
@@ -306,7 +320,7 @@ class LoanController extends Controller
 
             Log::info('Loan activated successfully', [
                 'loan_id' => $loan->id,
-                'payments_count' => $loan->payments()->count()
+                'payments_count' => $loan->payments()->count(),
             ]);
 
             return response()->json([
@@ -317,12 +331,12 @@ class LoanController extends Controller
             Log::error('Error activating loan', [
                 'loan_id' => $loan->id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to activate loan',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
             ], 500);
         }
     }
@@ -352,7 +366,7 @@ class LoanController extends Controller
 
         $filePath = public_path($document->file_path);
 
-        if (!file_exists($filePath)) {
+        if (! file_exists($filePath)) {
             abort(404, 'File not found');
         }
 

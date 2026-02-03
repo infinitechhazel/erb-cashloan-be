@@ -1,9 +1,10 @@
 <?php
 
-use App\Http\Controllers\LoanOfficerController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BorrowerController;
+use App\Http\Controllers\LenderController;
 use App\Http\Controllers\LoanController;
+use App\Http\Controllers\LoanOfficerController;
 use App\Http\Controllers\PaymentController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -50,13 +51,16 @@ Route::middleware('auth:sanctum')->group(function () {
     // Payment routes - specific routes MUST come before parameterized routes
     Route::get('/payments/upcoming', [PaymentController::class, 'upcoming']);
     Route::get('/payments/overdue', [PaymentController::class, 'overdue']);
-    Route::post('/payments', [PaymentController::class, 'recordPayment']); // ADD THIS LINE
+    Route::post('/payments', [PaymentController::class, 'recordPayment']);
     Route::get('/loans/{loan}/payments', [PaymentController::class, 'index']);
     Route::post('/loans/{loan}/payments', [PaymentController::class, 'store']);
     Route::get('/payments/{payment}', [PaymentController::class, 'show']);
 
-    // Loan Officer
+    // Loan Officer 
     Route::get('/loan-officers', [LoanOfficerController::class, 'index']);
+
+    // Lenders
+    Route::get('/lenders', [LenderController::class, 'index']);
 
     // Borrower
     Route::get('/borrowers', [BorrowerController::class, 'index']);

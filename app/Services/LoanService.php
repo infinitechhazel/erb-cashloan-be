@@ -28,7 +28,7 @@ class LoanService
 
         $loan = Loan::create([
             'borrower_id' => $borrowerId,
-            'loan_number' => 'LN-' . strtoupper(uniqid()),
+            'loan_number' => 'LN-'.strtoupper(uniqid()),
             'type' => $type,
             'principal_amount' => $principalAmount,
             'interest_rate' => $interestRate,
@@ -96,10 +96,10 @@ class LoanService
         ?Carbon $firstPaymentDate = null
     ): Loan {
         DB::beginTransaction();
-        
+
         try {
             $disbursementDate = $startDate ?? now();
-            
+
             // Update loan status
             $loan->update([
                 'status' => 'active',
@@ -117,7 +117,7 @@ class LoanService
             DB::rollBack();
             Log::error('Failed to activate loan', [
                 'loan_id' => $loan->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
             throw $e;
         }
@@ -138,9 +138,9 @@ class LoanService
         // Calculate monthly payment using amortization formula
         // M = P * [r(1+r)^n] / [(1+r)^n - 1]
         $monthlyRate = $interestRate / 12;
-        
+
         if ($monthlyRate > 0) {
-            $monthlyPayment = $amount * ($monthlyRate * pow(1 + $monthlyRate, $termMonths)) 
+            $monthlyPayment = $amount * ($monthlyRate * pow(1 + $monthlyRate, $termMonths))
                             / (pow(1 + $monthlyRate, $termMonths) - 1);
         } else {
             // If no interest, simple division
@@ -152,11 +152,11 @@ class LoanService
 
         // Determine start date for payments
         $startDate = $firstPaymentDate ?? ($loan->disbursement_date ?? now());
-        
+
         // Generate payment schedule
         for ($i = 1; $i <= $termMonths; $i++) {
             $dueDate = Carbon::parse($startDate)->addMonths($i);
-            
+
             // For the last payment, adjust to cover any rounding differences
             $paymentAmount = $monthlyPayment;
             if ($i === $termMonths) {
@@ -175,7 +175,7 @@ class LoanService
                 'loan_id' => $loan->id,
                 'payment_number' => $i,
                 'amount' => $paymentAmount,
-                'due_date' => $dueDate->format('Y-m-d')
+                'due_date' => $dueDate->format('Y-m-d'),
             ]);
         }
     }
@@ -187,13 +187,13 @@ class LoanService
     {
         return Payment::whereHas('loan', function ($query) use ($userId) {
             $query->where('borrower_id', $userId)
-                  ->where('status', 'active');
+                ->where('status', 'active');
         })
-        ->where('status', 'pending')
-        ->where('due_date', '>=', now())
-        ->where('due_date', '<=', now()->addDays($days))
-        ->with('loan')
-        ->orderBy('due_date');
+            ->where('status', 'pending')
+            ->where('due_date', '>=', now())
+            ->where('due_date', '<=', now()->addDays($days))
+            ->with('loan')
+            ->orderBy('due_date');
     }
 
     /**
@@ -203,12 +203,12 @@ class LoanService
     {
         return Payment::whereHas('loan', function ($query) use ($userId) {
             $query->where('borrower_id', $userId)
-                  ->where('status', 'active');
+                ->where('status', 'active');
         })
-        ->where('status', 'pending')
-        ->where('due_date', '<', now())
-        ->with('loan')
-        ->orderBy('due_date');
+            ->where('status', 'pending')
+            ->where('due_date', '<', now())
+            ->with('loan')
+            ->orderBy('due_date');
     }
 
     /**
@@ -220,7 +220,7 @@ class LoanService
         ?string $transactionId = null
     ): Payment {
         DB::beginTransaction();
-        
+
         try {
             $payment->update([
                 'status' => 'paid',
@@ -232,17 +232,17 @@ class LoanService
             // Update loan's outstanding balance
             $loan = $payment->loan;
             $loan->outstanding_balance = max(0, $loan->outstanding_balance - $payment->amount);
-            
+
             // Check if loan is fully paid
             $remainingPayments = $loan->payments()
                 ->where('status', 'pending')
                 ->count();
-                
+
             if ($remainingPayments === 0 || $loan->outstanding_balance <= 0.01) {
                 $loan->status = 'completed';
                 $loan->completed_at = now();
             }
-            
+
             $loan->save();
 
             DB::commit();
@@ -251,7 +251,7 @@ class LoanService
                 'payment_id' => $payment->id,
                 'loan_id' => $loan->id,
                 'amount' => $payment->amount,
-                'remaining_balance' => $loan->outstanding_balance
+                'remaining_balance' => $loan->outstanding_balance,
             ]);
 
             return $payment->fresh();
@@ -259,7 +259,7 @@ class LoanService
             DB::rollBack();
             Log::error('Failed to record payment', [
                 'payment_id' => $payment->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
             throw $e;
         }
@@ -274,7 +274,7 @@ class LoanService
             return [
                 'total_loans' => Loan::where('borrower_id', $userId)->count(),
                 'active_loans' => Loan::where('borrower_id', $userId)->where('status', 'active')->count(),
-                'total_borrowed' => Loan::where('borrower_id', $userId)->where('status', '!=', 'rejected')->sum('amount'),
+                'total_borrowed' => Loan::where('borrower_id', $userId)->where('status', '!=', 'rejected')->sum('principal_amount'),
                 'total_outstanding' => Loan::where('borrower_id', $userId)->where('status', 'active')->sum('outstanding_balance'),
             ];
         }
@@ -284,7 +284,7 @@ class LoanService
                 'total_loans' => Loan::count(),
                 'pending_loans' => Loan::where('status', 'pending')->count(),
                 'active_loans' => Loan::where('status', 'active')->count(),
-                'total_disbursed' => Loan::whereIn('status', ['active', 'completed'])->sum('amount'),
+                'total_disbursed' => Loan::whereIn('status', ['active', 'completed'])->sum('principal_amount'),
             ];
         }
 
