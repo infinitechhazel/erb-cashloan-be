@@ -142,18 +142,17 @@ class LoanController extends Controller
             if ($user->isAdmin()) {
                 $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents']);
             } elseif ($user->isLender()) {
-                // Lender sees:
-                // 1. All pending or approved loans (unassigned)
-                // 2. Only their own active loans
                 $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents'])
                     ->where(function ($q) use ($user) {
+                        // 1. All pending and approved loans (any lender)
                         $q->whereIn('status', ['pending', 'approved'])
-                            ->whereNull('lender_id') // only unassigned loans
+                          // 2. OR only active loans assigned to this lender
                             ->orWhere(function ($q2) use ($user) {
                                 $q2->where('lender_id', $user->id)
                                     ->where('status', 'active');
                             });
                     });
+
             } elseif ($user->isLoanOfficer()) {
                 $query = Loan::where('loan_officer_id', $user->id)
                     ->with(['borrower', 'lender', 'documents']);
