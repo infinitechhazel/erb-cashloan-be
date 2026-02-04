@@ -8,6 +8,7 @@ use App\Models\LoanDocument;
 use App\Models\User;
 use App\Services\LoanService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -141,9 +142,18 @@ class LoanController extends Controller
             if ($user->isAdmin()) {
                 $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents']);
             } elseif ($user->isLender()) {
-                // Only show loans assigned to this lender
-                $query = Loan::where('lender_id', $user->id)
-                    ->with(['borrower', 'loanOfficer', 'documents']);
+                // Lender sees:
+                // 1. All pending or approved loans (unassigned)
+                // 2. Only their own active loans
+                $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents'])
+                    ->where(function ($q) use ($user) {
+                        $q->whereIn('status', ['pending', 'approved'])
+                            ->whereNull('lender_id') // only unassigned loans
+                            ->orWhere(function ($q2) use ($user) {
+                                $q2->where('lender_id', $user->id)
+                                    ->where('status', 'active');
+                            });
+                    });
             } elseif ($user->isLoanOfficer()) {
                 $query = Loan::where('loan_officer_id', $user->id)
                     ->with(['borrower', 'lender', 'documents']);
@@ -298,47 +308,36 @@ class LoanController extends Controller
      */
     public function activate(Request $request, Loan $loan)
     {
-        try {
-            $this->authorize('activate', $loan);
+        $this->authorize('activate', $loan);
 
-            if ($loan->status !== 'approved') {
-                return response()->json([
-                    'message' => 'Only approved loans can be activated',
-                ], 422);
-            }
-
-            Log::info('Activating loan', [
-                'loan_id' => $loan->id,
-                'loan_number' => $loan->loan_number,
-                'user_id' => auth()->id(),
-            ]);
-
-            $startDate = $request->input('start_date') ? now()->parse($request->input('start_date')) : null;
-            $firstPaymentDate = $request->input('first_payment_date') ? now()->parse($request->input('first_payment_date')) : null;
-
-            $loan = $this->loanService->activateLoan($loan, $startDate, $firstPaymentDate);
-
-            Log::info('Loan activated successfully', [
-                'loan_id' => $loan->id,
-                'payments_count' => $loan->payments()->count(),
-            ]);
-
-            return response()->json([
-                'message' => 'Loan activated successfully. Payment schedule has been generated.',
-                'loan' => $loan->load(['borrower', 'lender', 'loanOfficer', 'payments']),
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Error activating loan', [
-                'loan_id' => $loan->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            return response()->json([
-                'message' => 'Failed to activate loan',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
-            ], 500);
+        if ($loan->status !== 'approved') {
+            return response()->json(['message' => 'Only approved loans can be activated'], 422);
         }
+
+        $request->validate([
+            'start_date' => 'required|date',
+            'first_payment_date' => 'required|date|after_or_equal:start_date',
+            'notes' => 'nullable|string',
+        ]);
+
+        $currentUser = Auth::user();
+
+        $loan->status = 'active';
+        $loan->start_date = $request->input('start_date');
+        $loan->first_payment_date = $request->input('first_payment_date');
+        $loan->notes = $request->input('notes', $loan->notes);
+
+        // Assign lender_id only if the user is a lender
+        if ($currentUser->isLender()) {
+            $loan->lender_id = $currentUser->id;
+        }
+
+        $loan->save();
+
+        return response()->json([
+            'message' => 'Loan activated successfully',
+            'loan' => $loan,
+        ]);
     }
 
     /**
