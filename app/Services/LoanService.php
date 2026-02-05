@@ -93,19 +93,38 @@ class LoanService
     public function activateLoan(
         Loan $loan,
         ?Carbon $startDate = null,
-        ?Carbon $firstPaymentDate = null
+        ?Carbon $firstPaymentDate = null,
+        ?string $notes = null
     ): Loan {
         DB::beginTransaction();
 
         try {
-            $disbursementDate = $startDate ?? now();
+            if ($loan->approved_amount === null) {
+                throw new \Exception('Loan must be approved before activation');
+            }
 
-            // Update loan status
-            $loan->update([
+            $startDate = $startDate ?? now();
+
+            $principal = $loan->approved_amount;
+            $interestRate = $loan->interest_rate;
+            $termMonths = $loan->term_months;
+
+            $totalInterest = ($principal * $interestRate * $termMonths) / (12 * 100);
+            $totalPayable = round($principal + $totalInterest, 2);
+
+            $updateData = [
                 'status' => 'active',
-                'disbursement_date' => $disbursementDate,
-                'outstanding_balance' => $loan->total_amount,
-            ]);
+                'start_date' => $startDate,
+                'first_payment_date' => $firstPaymentDate,
+                'disbursement_date' => $startDate,
+                'outstanding_balance' => $totalPayable,
+            ];
+
+            if ($notes !== null) {
+                $updateData['notes'] = $notes;
+            }
+
+            $loan->update($updateData);
 
             // Generate payment schedule
             $this->generatePaymentSchedule($loan, $firstPaymentDate);
@@ -115,10 +134,6 @@ class LoanService
             return $loan->fresh();
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Failed to activate loan', [
-                'loan_id' => $loan->id,
-                'error' => $e->getMessage(),
-            ]);
             throw $e;
         }
     }
@@ -126,55 +141,99 @@ class LoanService
     /**
      * Generate payment schedule for a loan
      */
+    /**
+     * Generate amortized payment schedule for a loan
+     */
     public function generatePaymentSchedule(Loan $loan, ?Carbon $firstPaymentDate = null): void
     {
-        // Delete existing payments if any
-        $loan->payments()->delete();
-
-        $amount = $loan->approved_amount ?? $loan->amount;
-        $interestRate = $loan->interest_rate / 100; // Convert percentage to decimal
-        $termMonths = $loan->term_months;
-
-        // Calculate monthly payment using amortization formula
-        // M = P * [r(1+r)^n] / [(1+r)^n - 1]
-        $monthlyRate = $interestRate / 12;
-
-        if ($monthlyRate > 0) {
-            $monthlyPayment = $amount * ($monthlyRate * pow(1 + $monthlyRate, $termMonths))
-                            / (pow(1 + $monthlyRate, $termMonths) - 1);
-        } else {
-            // If no interest, simple division
-            $monthlyPayment = $amount / $termMonths;
+        /**
+         * SAFETY CHECK
+         * If term_months is missing or invalid, schedule generation must stop.
+         * Otherwise, the loop below will never run.
+         */
+        if (! $loan->term_months || $loan->term_months <= 0) {
+            throw new \Exception('Loan term_months is missing or invalid');
         }
 
-        // Round to 2 decimal places
+        /**
+         * Remove any existing payment schedule
+         * (prevents duplicate schedules on re-activation)
+         */
+        $loan->payments()->delete();
+
+        /**
+         * PRINCIPAL & TERMS
+         */
+        $principal = $loan->approved_amount;     // Loan amount to amortize
+        $interestRate = $loan->interest_rate / 100; // Convert % to decimal
+        $termMonths = $loan->term_months;          // Number of payments
+        $monthlyRate = $interestRate / 12;          // Monthly interest rate
+
+        /**
+         * MONTHLY PAYMENT CALCULATION
+         * Uses standard amortization formula:
+         *
+         * M = P * [r(1+r)^n] / [(1+r)^n − 1]
+         */
+        if ($monthlyRate > 0) {
+            $monthlyPayment = $principal *
+                ($monthlyRate * pow(1 + $monthlyRate, $termMonths)) /
+                (pow(1 + $monthlyRate, $termMonths) - 1);
+        } else {
+            // Zero-interest loan
+            $monthlyPayment = $principal / $termMonths;
+        }
+
+        // Ensure currency precision
         $monthlyPayment = round($monthlyPayment, 2);
 
-        // Determine start date for payments
-        $startDate = $firstPaymentDate ?? ($loan->disbursement_date ?? now());
+        /**
+         * PAYMENT START DATE
+         * If first_payment_date is provided, it is already the FIRST due date.
+         */
+        $startDate = $firstPaymentDate ?? $loan->disbursement_date;
 
-        // Generate payment schedule
+        /**
+         * GENERATE PAYMENT ROWS
+         */
         for ($i = 1; $i <= $termMonths; $i++) {
-            $dueDate = Carbon::parse($startDate)->addMonths($i);
 
-            // For the last payment, adjust to cover any rounding differences
-            $paymentAmount = $monthlyPayment;
+            // First payment = startDate, next payments follow monthly
+            $dueDate = Carbon::parse($startDate)->addMonths($i - 1);
+
+            /**
+             * Default payment amount
+             */
+            $amount = $monthlyPayment;
+
+            /**
+             * LAST PAYMENT ADJUSTMENT
+             * Fixes rounding differences so total equals principal exactly.
+             */
             if ($i === $termMonths) {
-                $totalPaid = $monthlyPayment * ($termMonths - 1);
-                $paymentAmount = round($loan->total_amount - $totalPaid, 2);
+                $amount = round(
+                    $principal - ($monthlyPayment * ($termMonths - 1)),
+                    2
+                );
             }
 
+            /**
+             * Create payment record
+             */
             Payment::create([
                 'loan_id' => $loan->id,
-                'amount' => $paymentAmount,
+                'amount' => $amount,
                 'due_date' => $dueDate,
                 'status' => 'pending',
             ]);
 
+            /**
+             * Optional debug log
+             */
             Log::info('Payment scheduled', [
                 'loan_id' => $loan->id,
                 'payment_number' => $i,
-                'amount' => $paymentAmount,
+                'amount' => $amount,
                 'due_date' => $dueDate->format('Y-m-d'),
             ]);
         }

@@ -6,8 +6,8 @@ use App\Models\Loan;
 use App\Models\Payment;
 use App\Services\LoanService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 class PaymentController extends Controller
@@ -32,6 +32,80 @@ class PaymentController extends Controller
         return response()->json([
             'payments' => $payments,
         ]);
+    }
+
+    public function adminIndex(Request $request)
+    {
+        try {
+            $type = $request->query('type', 'all');
+            $search = $request->query('search', '');
+            $sortColumn = $request->query('sort_column', 'due_date');
+            $sortOrder = $request->query('sort_order', 'asc');
+            $perPage = (int) $request->query('per_page', 10);
+
+            // Allowed columns for sorting to prevent SQL injection
+            $allowedSorts = ['due_date', 'created_at', 'amount', 'loan_id', 'status'];
+            if (! in_array($sortColumn, $allowedSorts)) {
+                $sortColumn = 'due_date';
+            }
+            $sortOrder = $sortOrder === 'desc' ? 'desc' : 'asc';
+
+            $query = Payment::query()->with(['loan.borrower']);
+
+            // Filter type
+            $today = now()->toDateString();
+            switch ($type) {
+                case 'upcoming':
+                    $query->where('status', 'pending')
+                        ->where('due_date', '>=', $today);
+                    break;
+                case 'overdue':
+                    $query->where('status', 'pending')
+                        ->where('due_date', '<', $today);
+                    break;
+                case 'paid':
+                    $query->where('status', 'paid');
+                    break;
+                case 'all':
+                default:
+                    // no filter
+                    break;
+            }
+
+            // Global search
+            if (! empty($search)) {
+                $query->where(function ($q) use ($search) {
+                    // Search loan borrower name/email
+                    $q->whereHas('loan.borrower', function ($b) use ($search) {
+                        $b->where('first_name', 'like', "%{$search}%")
+                            ->orWhere('last_name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    });
+
+                    // Search payment's loan_id or transaction_id
+                    $q->orWhere('loan_id', 'like', "%{$search}%")
+                        ->orWhere('transaction_id', 'like', "%{$search}%")
+                        ->orWhere('id', 'like', "%{$search}%");
+                });
+            }
+
+            // Sorting
+            $query->orderBy($sortColumn, $sortOrder);
+
+            // Paginate
+            $payments = $query->paginate($perPage);
+
+            return response()->json($payments);
+        } catch (\Exception $e) {
+            Log::error('Error fetching admin payments', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => $e->getMessage(), // return actual error during dev
+            ], 500);
+        }
     }
 
     /**
@@ -64,7 +138,7 @@ class PaymentController extends Controller
             ->orderBy('due_date')
             ->first();
 
-        if (!$payment) {
+        if (! $payment) {
             return response()->json([
                 'message' => 'No pending payments for this loan',
             ], 422);
@@ -91,8 +165,8 @@ class PaymentController extends Controller
     {
         try {
             $user = auth()->user();
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'message' => 'Unauthenticated',
                 ], 401);
@@ -107,13 +181,13 @@ class PaymentController extends Controller
 
             Log::info('Recording payment', [
                 'user_id' => $user->id,
-                'data' => $validated
+                'data' => $validated,
             ]);
 
             // Get the loan
             $loan = Loan::find($validated['payment_id']);
 
-            if (!$loan) {
+            if (! $loan) {
                 return response()->json([
                     'message' => 'Loan not found',
                 ], 404);
@@ -138,7 +212,7 @@ class PaymentController extends Controller
             try {
                 // Get available columns in payments table
                 $paymentColumns = Schema::getColumnListing('payments');
-                
+
                 // Build payment data based on available columns
                 $paymentData = [
                     'loan_id' => $loan->id,
@@ -152,13 +226,13 @@ class PaymentController extends Controller
                 if (in_array('payment_date', $paymentColumns)) {
                     $paymentData['payment_date'] = now();
                 }
-                
+
                 if (in_array('transaction_id', $paymentColumns)) {
-                    $paymentData['transaction_id'] = 'TXN-' . strtoupper(uniqid());
+                    $paymentData['transaction_id'] = 'TXN-'.strtoupper(uniqid());
                 }
-                
+
                 if (in_array('reference_number', $paymentColumns)) {
-                    $paymentData['reference_number'] = 'REF-' . strtoupper(uniqid());
+                    $paymentData['reference_number'] = 'REF-'.strtoupper(uniqid());
                 }
 
                 // Create payment record
@@ -167,10 +241,10 @@ class PaymentController extends Controller
                 // Update loan balance
                 $currentBalance = floatval($loan->outstanding_balance ?? $loan->amount);
                 $newBalance = max(0, $currentBalance - floatval($validated['amount']));
-                
+
                 // Get available columns in loans table
                 $loanColumns = Schema::getColumnListing('loans');
-                
+
                 if (in_array('outstanding_balance', $loanColumns)) {
                     $loan->outstanding_balance = $newBalance;
                 }
@@ -190,7 +264,7 @@ class PaymentController extends Controller
                     'payment_id' => $payment->id,
                     'loan_id' => $loan->id,
                     'amount' => $validated['amount'],
-                    'new_balance' => $newBalance
+                    'new_balance' => $newBalance,
                 ]);
 
                 return response()->json([
@@ -203,7 +277,7 @@ class PaymentController extends Controller
                 DB::rollBack();
                 Log::error('Database error while recording payment', [
                     'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString()
+                    'trace' => $e->getTraceAsString(),
                 ]);
                 throw $e;
             }
@@ -216,12 +290,12 @@ class PaymentController extends Controller
         } catch (\Exception $e) {
             Log::error('Error recording payment', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to record payment',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
             ], 500);
         }
     }
@@ -233,34 +307,34 @@ class PaymentController extends Controller
     {
         try {
             $user = auth()->user();
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'message' => 'Unauthenticated',
                 ], 401);
             }
 
-            $days = (int)$request->input('days', 30);
+            $days = (int) $request->input('days', 30);
 
             Log::info('Fetching upcoming payments', [
                 'user_id' => $user->id,
-                'days' => $days
+                'days' => $days,
             ]);
 
             // Check if the method exists
-            if (!method_exists($this->loanService, 'getUpcomingPayments')) {
+            if (! method_exists($this->loanService, 'getUpcomingPayments')) {
                 Log::error('Method getUpcomingPayments does not exist on LoanService');
-                
+
                 // Fallback: Query directly
                 $payments = Payment::whereHas('loan', function ($query) use ($user) {
                     $query->where('borrower_id', $user->id);
                 })
-                ->where('status', 'pending')
-                ->where('due_date', '>=', now())
-                ->where('due_date', '<=', now()->addDays($days))
-                ->with('loan')
-                ->orderBy('due_date')
-                ->paginate(15);
+                    ->where('status', 'pending')
+                    ->where('due_date', '>=', now())
+                    ->where('due_date', '<=', now()->addDays($days))
+                    ->with('loan')
+                    ->orderBy('due_date')
+                    ->paginate(15);
 
                 return response()->json([
                     'payments' => $payments,
@@ -275,12 +349,12 @@ class PaymentController extends Controller
         } catch (\Exception $e) {
             Log::error('Error fetching upcoming payments', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to fetch upcoming payments',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
             ], 500);
         }
     }
@@ -292,30 +366,30 @@ class PaymentController extends Controller
     {
         try {
             $user = auth()->user();
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'message' => 'Unauthenticated',
                 ], 401);
             }
 
             Log::info('Fetching overdue payments', [
-                'user_id' => $user->id
+                'user_id' => $user->id,
             ]);
 
             // Check if the method exists
-            if (!method_exists($this->loanService, 'getOverduePayments')) {
+            if (! method_exists($this->loanService, 'getOverduePayments')) {
                 Log::error('Method getOverduePayments does not exist on LoanService');
-                
+
                 // Fallback: Query directly
                 $payments = Payment::whereHas('loan', function ($query) use ($user) {
                     $query->where('borrower_id', $user->id);
                 })
-                ->where('status', 'pending')
-                ->where('due_date', '<', now())
-                ->with('loan')
-                ->orderBy('due_date')
-                ->paginate(15);
+                    ->where('status', 'pending')
+                    ->where('due_date', '<', now())
+                    ->with('loan')
+                    ->orderBy('due_date')
+                    ->paginate(15);
 
                 return response()->json([
                     'payments' => $payments,
@@ -330,12 +404,12 @@ class PaymentController extends Controller
         } catch (\Exception $e) {
             Log::error('Error fetching overdue payments', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to fetch overdue payments',
-                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
             ], 500);
         }
     }

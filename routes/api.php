@@ -51,12 +51,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // Payment routes - specific routes MUST come before parameterized routes
     Route::get('/payments/upcoming', [PaymentController::class, 'upcoming']);
     Route::get('/payments/overdue', [PaymentController::class, 'overdue']);
+    Route::get('/payments', [PaymentController::class, 'adminIndex']);
     Route::post('/payments', [PaymentController::class, 'recordPayment']);
     Route::get('/loans/{loan}/payments', [PaymentController::class, 'index']);
     Route::post('/loans/{loan}/payments', [PaymentController::class, 'store']);
     Route::get('/payments/{payment}', [PaymentController::class, 'show']);
 
-    // Loan Officer 
+    // Loan Officer
     Route::get('/loan-officers', [LoanOfficerController::class, 'index']);
 
     // Lenders
@@ -64,4 +65,5 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Borrower
     Route::get('/borrowers', [BorrowerController::class, 'index']);
+    Route::get('/borrowers/{borrower}', [BorrowerController::class, 'show']);
 });

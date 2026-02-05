@@ -10,7 +10,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Loan extends Model
 {
     use HasFactory;
-protected $appends = ['amount'];
+
+    protected $appends = ['amount'];
+
     protected $fillable = [
         'borrower_id',
         'lender_id',
@@ -21,6 +23,7 @@ protected $appends = ['amount'];
         'interest_rate',
         'term_months',
         'purpose',
+        'outstanding_balance',
         'employment_status',
         'status',
         'approved_at',
@@ -28,6 +31,7 @@ protected $appends = ['amount'];
         'rejection_reason',
         'start_date',
         'first_payment_date',
+        'disbursement_date',
         'notes',
     ];
 
@@ -35,6 +39,7 @@ protected $appends = ['amount'];
         'principal_amount' => 'decimal:2',
         'approved_amount' => 'decimal:2',
         'interest_rate' => 'decimal:2',
+        'outstanding_balance' => 'float',
         'term_months' => 'integer',
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',
@@ -145,8 +150,9 @@ protected $appends = ['amount'];
     {
         return $this->status === 'completed';
     }
+
     public function getAmountAttribute(): string
-{
-    return $this->principal_amount ?? '0.00';
-}
+    {
+        return $this->principal_amount ?? '0.00';
+    }
 }

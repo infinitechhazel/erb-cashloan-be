@@ -14,7 +14,7 @@ class BorrowerPolicy
      */
     public function viewAny(User $user): bool
     {
-        return $user->isAdmin(); // Only admins can list all borrowers
+        return $user->isAdmin() || $user->isLender();
     }
 
     /**
