@@ -98,6 +98,7 @@ class BorrowerController extends Controller
                     'start_date' => $loan->start_date,
                     'first_payment_date' => $loan->first_payment_date,
                     'outstanding_balance' => $loan->outstanding_balance,
+                    'documents' => $loan->documents,
                     'created_at' => $loan->created_at,
                     'updated_at' => $loan->updated_at,
                     // Payments for this loan
@@ -105,6 +106,7 @@ class BorrowerController extends Controller
                         return [
                             'id' => $payment->id,
                             'transaction_id' => $payment->transaction_id,
+                            'proof_of_payment' => $payment->proof_of_payment,
                             'amount' => $payment->amount,
                             'status' => $payment->status,
                             'due_date' => $payment->due_date,

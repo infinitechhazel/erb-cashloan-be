@@ -86,13 +86,6 @@ class LoanController extends Controller
                             'mime_type' => $mimeType,
                             'uploaded_by' => $user->id,
                         ]);
-
-                        Log::info('Document uploaded successfully', [
-                            'loan_id' => $loan->id,
-                            'document_type' => $documentType,
-                            'filename' => $filename,
-                            'size' => $fileSize,
-                        ]);
                     }
                 }
             }
@@ -172,11 +165,6 @@ class LoanController extends Controller
             // Get all loans without pagination for simplicity
             $loans = $query->orderBy('created_at', 'desc')->get();
 
-            Log::info('Loans fetched successfully', [
-                'count' => $loans->count(),
-                'user_id' => $user->id,
-            ]);
-
             return response()->json([
                 'loans' => $loans,
             ]);
@@ -215,7 +203,6 @@ class LoanController extends Controller
     public function update(Request $request, Loan $loan)
     {
         $this->authorize('update', $loan);
-        Log::info('Activate loan payload', $request->all());
 
         $validated = $request->validate([
             'status' => 'sometimes|in:pending,approved,rejected,active,completed,defaulted',

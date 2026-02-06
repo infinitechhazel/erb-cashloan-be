@@ -34,7 +34,7 @@ class LoanPolicy
         }
 
         // Lenders can view loans they're assigned to
-        if ($user->isLender() && $loan->lender_id === $user->id) {
+        if ($user->isLender()) {
             return true;
         }
 

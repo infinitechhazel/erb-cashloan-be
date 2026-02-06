@@ -226,16 +226,6 @@ class LoanService
                 'due_date' => $dueDate,
                 'status' => 'pending',
             ]);
-
-            /**
-             * Optional debug log
-             */
-            Log::info('Payment scheduled', [
-                'loan_id' => $loan->id,
-                'payment_number' => $i,
-                'amount' => $amount,
-                'due_date' => $dueDate->format('Y-m-d'),
-            ]);
         }
     }
 
@@ -305,13 +295,6 @@ class LoanService
             $loan->save();
 
             DB::commit();
-
-            Log::info('Payment recorded', [
-                'payment_id' => $payment->id,
-                'loan_id' => $loan->id,
-                'amount' => $payment->amount,
-                'remaining_balance' => $loan->outstanding_balance,
-            ]);
 
             return $payment->fresh();
         } catch (\Exception $e) {

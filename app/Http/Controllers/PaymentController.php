@@ -27,8 +27,8 @@ class PaymentController extends Controller
         $this->authorize('view', $loan);
 
         $payments = $loan->payments()
-            ->orderBy('due_date')
-            ->paginate(20);
+            ->orderBy('id')
+            ->paginate(10);
 
         return response()->json([
             'payments' => $payments,
@@ -40,14 +40,14 @@ class PaymentController extends Controller
         try {
             $type = $request->query('type', 'all');
             $search = $request->query('search', '');
-            $sortColumn = $request->query('sort_column', 'due_date');
-            $sortOrder = $request->query('sort_order', 'asc');
+            $sortColumn = $request->query('sort_column', 'id');
+            $sortOrder = $request->query('sort_order', 'desc');
             $perPage = (int) $request->query('per_page', 10);
 
             // Allowed columns for sorting to prevent SQL injection
-            $allowedSorts = ['due_date', 'created_at', 'amount', 'loan_id', 'status'];
+            $allowedSorts = ['id', 'due_date', 'amount', 'loan_id', 'status'];
             if (! in_array($sortColumn, $allowedSorts)) {
-                $sortColumn = 'due_date';
+                $sortColumn = 'id';
             }
             $sortOrder = $sortOrder === 'desc' ? 'desc' : 'asc';
 
@@ -97,7 +97,7 @@ class PaymentController extends Controller
             }
 
             // Sorting
-            $query->orderBy($sortColumn, $sortOrder);
+            $query->orderBy($sortColumn, $sortOrder)->orderBy('id', 'desc');
 
             // Paginate
             $payments = $query->paginate($perPage);
@@ -185,11 +185,6 @@ class PaymentController extends Controller
                 'proof_of_payment' => 'required|file|image|max:10240', // 10MB
             ]);
 
-            Log::info('Recording payment', [
-                'user_id' => $user->id,
-                'data' => $validated,
-            ]);
-
             // Get the loan
             $loan = Loan::find($validated['payment_id']);
             if (! $loan) {
@@ -248,11 +243,6 @@ class PaymentController extends Controller
                 // Relative path for DB
                 $proofPath = "payment_proofs/{$payment->id}/{$fileName}";
 
-                Log::info('Proof of payment stored in public folder', [
-                    'proof_path' => $proofPath,
-                    'full_path' => $folder.DIRECTORY_SEPARATOR.$fileName,
-                ]);
-
                 if (in_array('proof_of_payment', $paymentColumns)) {
                     $payment->update(['proof_of_payment' => $proofPath]);
                 }
@@ -295,9 +285,7 @@ class PaymentController extends Controller
     public function verifyPayment(Request $request, Payment $payment)
     {
         $user = auth()->user();
-        // if (! ($user->is_admin || $user->is_lender)) {
-        //     return response()->json(['message' => 'Unauthorized'], 403);
-        // }
+        $this->authorize('view', $payment);
 
         if ($payment->status !== 'awaiting_verification') {
             return response()->json(['message' => 'Payment not waiting for verification'], 422);
@@ -344,11 +332,6 @@ class PaymentController extends Controller
             }
 
             $days = (int) $request->input('days', 30);
-
-            Log::info('Fetching upcoming payments', [
-                'user_id' => $user->id,
-                'days' => $days,
-            ]);
 
             // Check if the method exists
             if (! method_exists($this->loanService, 'getUpcomingPayments')) {
@@ -401,10 +384,6 @@ class PaymentController extends Controller
                     'message' => 'Unauthenticated',
                 ], 401);
             }
-
-            Log::info('Fetching overdue payments', [
-                'user_id' => $user->id,
-            ]);
 
             // Check if the method exists
             if (! method_exists($this->loanService, 'getOverduePayments')) {
