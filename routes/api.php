@@ -53,9 +53,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments/overdue', [PaymentController::class, 'overdue']);
     Route::get('/payments', [PaymentController::class, 'adminIndex']);
     Route::post('/payments', [PaymentController::class, 'recordPayment']);
+    Route::post('/payments/{payment}/verify', [PaymentController::class, 'verifyPayment']);
     Route::get('/loans/{loan}/payments', [PaymentController::class, 'index']);
     Route::post('/loans/{loan}/payments', [PaymentController::class, 'store']);
     Route::get('/payments/{payment}', [PaymentController::class, 'show']);
+    Route::get('/api/payments/{payment}/proof/download', [PaymentController::class, 'downloadProof']);
 
     // Loan Officer
     Route::get('/loan-officers', [LoanOfficerController::class, 'index']);
@@ -66,4 +68,5 @@ Route::middleware('auth:sanctum')->group(function () {
     // Borrower
     Route::get('/borrowers', [BorrowerController::class, 'index']);
     Route::get('/borrowers/{borrower}', [BorrowerController::class, 'show']);
+
 });

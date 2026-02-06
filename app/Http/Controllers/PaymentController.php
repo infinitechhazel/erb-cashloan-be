@@ -7,6 +7,7 @@ use App\Models\Payment;
 use App\Services\LoanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
@@ -65,6 +66,12 @@ class PaymentController extends Controller
                     break;
                 case 'paid':
                     $query->where('status', 'paid');
+                    break;
+                case 'awaiting_verification':
+                    $query->where('status', 'awaiting_verification');
+                    break;
+                case 'rejected':
+                    $query->where('status', 'rejected');
                     break;
                 case 'all':
                 default:
@@ -165,18 +172,17 @@ class PaymentController extends Controller
     {
         try {
             $user = auth()->user();
-
             if (! $user) {
-                return response()->json([
-                    'message' => 'Unauthenticated',
-                ], 401);
+                return response()->json(['message' => 'Unauthenticated'], 401);
             }
 
+            // Validate input
             $validated = $request->validate([
                 'payment_id' => 'required|integer|exists:loans,id',
                 'amount' => 'required|numeric|min:0.01',
                 'payment_method' => 'required|string|in:card,bank,ewallet',
                 'payment_details' => 'sometimes|array',
+                'proof_of_payment' => 'required|file|image|max:10240', // 10MB
             ]);
 
             Log::info('Recording payment', [
@@ -186,89 +192,73 @@ class PaymentController extends Controller
 
             // Get the loan
             $loan = Loan::find($validated['payment_id']);
-
             if (! $loan) {
-                return response()->json([
-                    'message' => 'Loan not found',
-                ], 404);
+                return response()->json(['message' => 'Loan not found'], 404);
             }
 
-            // Check if user owns this loan
+            // Check ownership
             if ($loan->borrower_id !== $user->id) {
-                return response()->json([
-                    'message' => 'Unauthorized to make payment for this loan',
-                ], 403);
+                return response()->json(['message' => 'Unauthorized to make payment for this loan'], 403);
             }
 
-            // Check if loan is active
+            // Check loan is active
             if ($loan->status !== 'active') {
-                return response()->json([
-                    'message' => 'Cannot make payment on a loan that is not active',
-                ], 422);
+                return response()->json(['message' => 'Cannot make payment on a loan that is not active'], 422);
             }
 
             DB::beginTransaction();
-
             try {
-                // Get available columns in payments table
-                $paymentColumns = Schema::getColumnListing('payments');
+                // Handle proof_of_payment upload
+                $file = $request->file('proof_of_payment');
+                $folder = public_path('payment_proofs');
 
-                // Build payment data based on available columns
+                if (! File::exists($folder)) {
+                    File::makeDirectory($folder, 0755, true); // recursive & writable
+                }
+
+                $extension = $file->getClientOriginalExtension();
+                $fileName = 'payment_'.$payment->id.'.'.$extension;
+
+                // Move file to public/payment_proofs/
+                $file->move($folder, $fileName);
+
+                // Relative path for DB
+                $proofPath = '/payment_proofs/'.$fileName;
+
+                Log::info('Proof of payment stored in public folder', [
+                    'proof_path' => $proofPath,
+                    'full_path' => $folder.DIRECTORY_SEPARATOR.$fileName,
+                ]);
+
+                // Create payment
+                $paymentColumns = Schema::getColumnListing('payments');
                 $paymentData = [
                     'loan_id' => $loan->id,
                     'amount' => $validated['amount'],
                     'due_date' => now(),
-                    'status' => 'paid',
+                    'status' => 'awaiting_verification', // user submitted, pending admin
                     'payment_method' => $validated['payment_method'],
                 ];
 
-                // Add optional columns if they exist
                 if (in_array('payment_date', $paymentColumns)) {
                     $paymentData['payment_date'] = now();
                 }
-
                 if (in_array('transaction_id', $paymentColumns)) {
                     $paymentData['transaction_id'] = 'TXN-'.strtoupper(uniqid());
                 }
-
                 if (in_array('reference_number', $paymentColumns)) {
                     $paymentData['reference_number'] = 'REF-'.strtoupper(uniqid());
                 }
+                if (in_array('proof_of_payment', $paymentColumns)) {
+                    $paymentData['proof_of_payment'] = $proofPath;
+                }
 
-                // Create payment record
                 $payment = Payment::create($paymentData);
-
-                // Update loan balance
-                $currentBalance = floatval($loan->outstanding_balance ?? $loan->amount);
-                $newBalance = max(0, $currentBalance - floatval($validated['amount']));
-
-                // Get available columns in loans table
-                $loanColumns = Schema::getColumnListing('loans');
-
-                if (in_array('outstanding_balance', $loanColumns)) {
-                    $loan->outstanding_balance = $newBalance;
-                }
-
-                // ONLY mark loan as completed if balance is 0 or very close to 0 (accounting for floating point)
-                if ($newBalance <= 0.01) {
-                    $loan->status = 'completed';
-                }
-                // Otherwise keep it active
-                // DO NOT change status if there's still balance remaining
-
-                $loan->save();
 
                 DB::commit();
 
-                Log::info('Payment recorded successfully', [
-                    'payment_id' => $payment->id,
-                    'loan_id' => $loan->id,
-                    'amount' => $validated['amount'],
-                    'new_balance' => $newBalance,
-                ]);
-
                 return response()->json([
-                    'message' => 'Payment recorded successfully',
+                    'message' => 'Payment submitted successfully, awaiting verification',
                     'payment' => $payment->load('loan'),
                     'loan' => $loan->fresh(),
                 ], 201);
@@ -281,7 +271,6 @@ class PaymentController extends Controller
                 ]);
                 throw $e;
             }
-
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'message' => 'Validation failed',
@@ -298,6 +287,44 @@ class PaymentController extends Controller
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
             ], 500);
         }
+    }
+
+    // verify payment
+    public function verifyPayment(Request $request, Payment $payment)
+    {
+        $user = auth()->user();
+        // if (! ($user->is_admin || $user->is_lender)) {
+        //     return response()->json(['message' => 'Unauthorized'], 403);
+        // }
+
+        if ($payment->status !== 'awaiting_verification') {
+            return response()->json(['message' => 'Payment not waiting for verification'], 422);
+        }
+
+        $action = $request->input('action'); // 'approve' or 'reject'
+        $loan = $payment->loan;
+
+        if ($action === 'approve') {
+            $payment->markAsPaid(
+                $payment->payment_method,
+                $payment->transaction_id,
+                $payment->proof_of_payment,
+                $user->id
+            );
+        } elseif ($action === 'reject') {
+            $payment->markAsRejected(
+                $request->input('reason', 'Rejected by admin'),
+                $user->id
+            );
+        } else {
+            return response()->json(['message' => 'Invalid action'], 422);
+        }
+
+        return response()->json([
+            'message' => 'Payment updated successfully',
+            'payment' => $payment->fresh(),
+            'loan' => $loan->fresh(),
+        ]);
     }
 
     /**
@@ -412,5 +439,18 @@ class PaymentController extends Controller
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
             ], 500);
         }
+    }
+
+    public function downloadProof(Payment $payment)
+    {
+        $this->authorize('view', $payment);
+
+        $filePath = public_path($payment->proof_of_payment);
+
+        if (! file_exists($filePath)) {
+            abort(404, 'File not found');
+        }
+
+        return response()->download($filePath, basename($payment->proof_of_payment));
     }
 }

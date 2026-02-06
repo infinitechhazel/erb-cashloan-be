@@ -22,7 +22,7 @@ class PaymentPolicy
             return true;
         }
 
-        if ($user->isLender() && $loan->lender_id === $user->id) {
+        if ($user->isLender()) {
             return true;
         }
 
