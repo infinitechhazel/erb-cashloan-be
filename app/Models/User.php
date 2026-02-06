@@ -146,4 +146,9 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         return trim($this->first_name . ' ' . $this->last_name);
     }
+
+    public function loans()
+    {
+        return $this->hasMany(Loan::class); // Make sure you have Loan model
+    }
 }

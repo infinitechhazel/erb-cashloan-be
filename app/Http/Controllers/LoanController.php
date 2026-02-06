@@ -58,15 +58,15 @@ class LoanController extends Controller
 
                         // Generate unique filename
                         $filename = Str::slug(pathinfo($originalName, PATHINFO_FILENAME))
-                            .'_'.time()
-                            .'_'.Str::random(8)
-                            .'.'.$extension;
+                            . '_' . time()
+                            . '_' . Str::random(8)
+                            . '.' . $extension;
 
                         // Move file to public path
-                        $destinationPath = public_path('documents/loans/'.$loan->id);
+                        $destinationPath = public_path('documents/loans/' . $loan->id);
 
                         // Create directory if it doesn't exist
-                        if (! file_exists($destinationPath)) {
+                        if (!file_exists($destinationPath)) {
                             mkdir($destinationPath, 0755, true);
                         }
 
@@ -74,7 +74,7 @@ class LoanController extends Controller
                         $file->move($destinationPath, $filename);
 
                         // Store relative path for database
-                        $filePath = 'documents/loans/'.$loan->id.'/'.$filename;
+                        $filePath = 'documents/loans/' . $loan->id . '/' . $filename;
 
                         // Create document record using the information we saved BEFORE moving
                         LoanDocument::create([
@@ -365,10 +365,21 @@ class LoanController extends Controller
 
         $filePath = public_path($document->file_path);
 
-        if (! file_exists($filePath)) {
+        if (!file_exists($filePath)) {
             abort(404, 'File not found');
         }
 
         return response()->download($filePath, $document->file_name);
     }
+
+    public function getBorrowerLoans($borrowerId)
+    {
+        // Fetch loans for the borrower
+        $loans = Loan::where('borrower_id', $borrowerId)->get();
+
+        return response()->json([
+            'loans' => $loans,
+        ]);
+    }
+
 }

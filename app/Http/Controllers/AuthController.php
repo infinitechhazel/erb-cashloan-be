@@ -187,4 +187,19 @@ class AuthController extends Controller
             'message' => 'Password reset successful',
         ]);
     }
+
+    /**
+     * Get user profile with loans
+     */
+    public function profile(Request $request)
+    {
+        $user = $request->user();
+
+        $loans = $user->loans()->orderBy('created_at', 'desc')->get();
+
+        return response()->json([
+            'user' => $user,
+            'loans' => $loans,
+        ]);
+    }
 }

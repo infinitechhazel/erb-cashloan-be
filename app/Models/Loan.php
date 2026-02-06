@@ -10,8 +10,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Loan extends Model
 {
     use HasFactory;
-protected $appends = ['amount'];
+    protected $appends = ['amount'];
     protected $fillable = [
+        'user_id',
         'borrower_id',
         'lender_id',
         'loan_officer_id',
@@ -146,7 +147,11 @@ protected $appends = ['amount'];
         return $this->status === 'completed';
     }
     public function getAmountAttribute(): string
-{
-    return $this->principal_amount ?? '0.00';
-}
+    {
+        return $this->principal_amount ?? '0.00';
+    }
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
 }

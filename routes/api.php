@@ -64,4 +64,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Borrower
     Route::get('/borrowers', [BorrowerController::class, 'index']);
+
+    // Get loans for a specific borrower
+    Route::get('/borrowers/{borrower}/loans', [LoanController::class, 'getBorrowerLoans']);
+
 });
