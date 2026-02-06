@@ -7,8 +7,8 @@ use App\Models\Loan;
 use App\Models\LoanDocument;
 use App\Models\User;
 use App\Services\LoanService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -86,13 +86,6 @@ class LoanController extends Controller
                             'mime_type' => $mimeType,
                             'uploaded_by' => $user->id,
                         ]);
-
-                        Log::info('Document uploaded successfully', [
-                            'loan_id' => $loan->id,
-                            'document_type' => $documentType,
-                            'filename' => $filename,
-                            'size' => $fileSize,
-                        ]);
                     }
                 }
             }
@@ -142,21 +135,27 @@ class LoanController extends Controller
             if ($user->isAdmin()) {
                 $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents']);
             } elseif ($user->isLender()) {
-                // Lender sees:
-                // 1. All pending or approved loans (unassigned)
-                // 2. Only their own active loans
                 $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents'])
                     ->where(function ($q) use ($user) {
-                        $q->whereIn('status', ['pending', 'approved'])
-                            ->whereNull('lender_id') // only unassigned loans
-                            ->orWhere(function ($q2) use ($user) {
-                                $q2->where('lender_id', $user->id)
-                                    ->where('status', 'active');
+                        // 1. All loans assigned to this loan officer (any status)
+                        $q->where('lender_id', $user->id)
+                          // 2. All unassigned pending loans
+                            ->orWhere(function ($q2) {
+                                $q2->where('status', 'pending');
                             });
                     });
+
             } elseif ($user->isLoanOfficer()) {
-                $query = Loan::where('loan_officer_id', $user->id)
-                    ->with(['borrower', 'lender', 'documents']);
+                $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents'])
+                    ->where(function ($q) use ($user) {
+                        // 1. All loans assigned to this loan officer (any status)
+                        $q->where('loan_officer_id', $user->id)
+                          // 2. All unassigned pending loans
+                            ->orWhere(function ($q2) {
+                                $q2->whereNull('loan_officer_id')
+                                    ->where('status', 'pending');
+                            });
+                    });
             } else {
                 // Borrower - show only their loans
                 $query = Loan::where('borrower_id', $user->id)
@@ -165,11 +164,6 @@ class LoanController extends Controller
 
             // Get all loans without pagination for simplicity
             $loans = $query->orderBy('created_at', 'desc')->get();
-
-            Log::info('Loans fetched successfully', [
-                'count' => $loans->count(),
-                'user_id' => $user->id,
-            ]);
 
             return response()->json([
                 'loans' => $loans,
@@ -204,7 +198,7 @@ class LoanController extends Controller
     }
 
     /**
-     * Update loan (admin/loan officer only)
+     * Update loan (admin/lender only)
      */
     public function update(Request $request, Loan $loan)
     {
@@ -217,6 +211,8 @@ class LoanController extends Controller
             'notes' => 'sometimes|string',
             'rejection_reason' => 'sometimes|string',
             'lender_id' => 'sometimes|exists:users,id',
+            'start_date' => 'sometimes|date',
+            'first_payment_date' => 'sometimes|date',
         ]);
 
         /** @var User $user */
@@ -308,36 +304,53 @@ class LoanController extends Controller
      */
     public function activate(Request $request, Loan $loan)
     {
-        $this->authorize('activate', $loan);
+        try {
+            // 1. Authorize
+            $this->authorize('activate', $loan);
 
-        if ($loan->status !== 'approved') {
-            return response()->json(['message' => 'Only approved loans can be activated'], 422);
+            // 2. Only approved loans can be activated
+            if ($loan->status !== 'approved') {
+                return response()->json([
+                    'message' => 'Only approved loans can be activated',
+                ], 422);
+            }
+
+            // 3. Validate input
+            $validated = $request->validate([
+                'start_date' => 'required|date',
+                'first_payment_date' => 'required|date|after_or_equal:start_date',
+                'notes' => 'nullable|string',
+            ]);
+
+            $startDate = Carbon::parse($validated['start_date']);
+            $firstPaymentDate = Carbon::parse($validated['first_payment_date']);
+
+            // 5. Activate loan via service
+            $loan = $this->loanService->activateLoan(
+                loan: $loan,
+                startDate: $startDate,
+                firstPaymentDate: $firstPaymentDate,
+                notes: $validated['notes'] ?? null
+            );
+
+            // 6. Return success with related data
+            return response()->json([
+                'message' => 'Loan activated successfully. Payment schedule has been generated.',
+                'loan' => $loan->load(['borrower', 'lender', 'loanOfficer', 'payments']),
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error activating loan', [
+                'loan_id' => $loan->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to activate loan',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
+            ], 500);
         }
-
-        $request->validate([
-            'start_date' => 'required|date',
-            'first_payment_date' => 'required|date|after_or_equal:start_date',
-            'notes' => 'nullable|string',
-        ]);
-
-        $currentUser = Auth::user();
-
-        $loan->status = 'active';
-        $loan->start_date = $request->input('start_date');
-        $loan->first_payment_date = $request->input('first_payment_date');
-        $loan->notes = $request->input('notes', $loan->notes);
-
-        // Assign lender_id only if the user is a lender
-        if ($currentUser->isLender()) {
-            $loan->lender_id = $currentUser->id;
-        }
-
-        $loan->save();
-
-        return response()->json([
-            'message' => 'Loan activated successfully',
-            'loan' => $loan,
-        ]);
     }
 
     /**

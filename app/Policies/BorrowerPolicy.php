@@ -14,7 +14,7 @@ class BorrowerPolicy
      */
     public function viewAny(User $user): bool
     {
-        return $user->isAdmin(); // Only admins can list all borrowers
+        return $user->isAdmin() || $user->isLender();
     }
 
     /**
@@ -22,7 +22,7 @@ class BorrowerPolicy
      */
     public function view(User $user, User $borrower): bool
     {
-        return $user->isAdmin() || $user->id === $borrower->id;
+        return $user->isAdmin() || $user->isLender();
     }
 
     /**
@@ -30,7 +30,7 @@ class BorrowerPolicy
      */
     public function create(User $user): bool
     {
-        return $user->isAdmin();
+        return $user->isAdmin() || $user->isLender();
     }
 
     /**
@@ -38,7 +38,7 @@ class BorrowerPolicy
      */
     public function update(User $user, User $borrower): bool
     {
-        return $user->isAdmin() || $user->id === $borrower->id;
+        return $user->isAdmin() || $user->isLender();
     }
 
     /**

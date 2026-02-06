@@ -34,7 +34,7 @@ class LoanPolicy
         }
 
         // Lenders can view loans they're assigned to
-        if ($user->isLender() && $loan->lender_id === $user->id) {
+        if ($user->isLender()) {
             return true;
         }
 
@@ -66,12 +66,12 @@ class LoanPolicy
         }
 
         // Loan officers can update loans they're assigned to
-        if ($user->isLoanOfficer() && $loan->loan_officer_id === $user->id) {
+        if ($user->isLoanOfficer()) {
             return true;
         }
 
         // Lenders can update loans they're assigned to
-        if ($user->isLender() && $loan->lender_id === $user->id) {
+        if ($user->isLender()) {
             return true;
         }
 
@@ -84,7 +84,7 @@ class LoanPolicy
     public function approve(User $user, Loan $loan): bool
     {
         // Only admins and loan officers can approve
-        return $user->isAdmin() || $user->isLoanOfficer();
+        return $user->isAdmin() || $user->isLender();
     }
 
     /**
@@ -93,7 +93,7 @@ class LoanPolicy
     public function reject(User $user, Loan $loan): bool
     {
         // Only admins and loan officers can reject
-        return $user->isAdmin() || $user->isLoanOfficer();
+        return $user->isAdmin() || $user->isLender();
     }
 
     /**
@@ -101,7 +101,7 @@ class LoanPolicy
      */
     public function activate(User $user, Loan $loan): bool
     {
-        // Only admins and lenders can activate approved loans
+        // Only admins and loan officer can activate approved loans
         return $user->isAdmin() || $user->isLender();
     }
 
