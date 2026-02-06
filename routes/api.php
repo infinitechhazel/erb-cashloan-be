@@ -57,7 +57,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/loans/{loan}/payments', [PaymentController::class, 'index']);
     Route::post('/loans/{loan}/payments', [PaymentController::class, 'store']);
     Route::get('/payments/{payment}', [PaymentController::class, 'show']);
-    Route::get('/api/payments/{payment}/proof/download', [PaymentController::class, 'downloadProof']);
+    Route::get('/payments/{payment}/proof/download', [PaymentController::class, 'downloadProof']);
 
     // Loan Officer
     Route::get('/loan-officers', [LoanOfficerController::class, 'index']);

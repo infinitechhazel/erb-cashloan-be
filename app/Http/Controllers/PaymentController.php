@@ -208,27 +208,6 @@ class PaymentController extends Controller
 
             DB::beginTransaction();
             try {
-                // Handle proof_of_payment upload
-                $file = $request->file('proof_of_payment');
-                $folder = public_path('payment_proofs');
-
-                if (! File::exists($folder)) {
-                    File::makeDirectory($folder, 0755, true); // recursive & writable
-                }
-
-                $extension = $file->getClientOriginalExtension();
-                $fileName = 'payment_'.$validated['payment_id'].'.'.$extension;
-
-                // Move file to public/payment_proofs/
-                $file->move($folder, $fileName);
-
-                // Relative path for DB
-                $proofPath = '/payment_proofs/'.$fileName;
-
-                Log::info('Proof of payment stored in public folder', [
-                    'proof_path' => $proofPath,
-                    'full_path' => $folder.DIRECTORY_SEPARATOR.$fileName,
-                ]);
 
                 // Create payment
                 $paymentColumns = Schema::getColumnListing('payments');
@@ -249,11 +228,34 @@ class PaymentController extends Controller
                 if (in_array('reference_number', $paymentColumns)) {
                     $paymentData['reference_number'] = 'REF-'.strtoupper(uniqid());
                 }
-                if (in_array('proof_of_payment', $paymentColumns)) {
-                    $paymentData['proof_of_payment'] = $proofPath;
-                }
 
                 $payment = Payment::create($paymentData);
+
+                // Handle proof_of_payment upload
+                $file = $request->file('proof_of_payment');
+                $folder = public_path("payment_proofs/{$payment->id}");
+
+                if (! File::exists($folder)) {
+                    File::makeDirectory($folder, 0755, true); // recursive & writable
+                }
+
+                $extension = $file->getClientOriginalExtension();
+                $fileName = 'payment_proof.'.$extension;
+
+                // Move file to public/payment_proofs/
+                $file->move($folder, $fileName);
+
+                // Relative path for DB
+                $proofPath = "payment_proofs/{$payment->id}/{$fileName}";
+
+                Log::info('Proof of payment stored in public folder', [
+                    'proof_path' => $proofPath,
+                    'full_path' => $folder.DIRECTORY_SEPARATOR.$fileName,
+                ]);
+
+                if (in_array('proof_of_payment', $paymentColumns)) {
+                    $payment->update(['proof_of_payment' => $proofPath]);
+                }
 
                 DB::commit();
 
@@ -441,20 +443,24 @@ class PaymentController extends Controller
         }
     }
 
-    // public function downloadProof(Payment $payment, Proof $document)
-    // {
-    //     $this->authorize('view', $payment);
+    public function downloadProof(Payment $payment)
+    {
+        $user = auth()->user();
 
-    //     if ($document->loan_id !== $payment->id) {
-    //         abort(404);
-    //     }
+        if (! $user) {
+            return response()->json([
+                'message' => 'Unauthenticated',
+            ], 401);
+        }
 
-    //     $filePath = public_path($document->file_path);
+        // Check if file exists
+        $filePath = public_path($payment->proof_of_payment);
+        if (! file_exists($filePath)) {
+            abort(404, 'File not found');
+        }
 
-    //     if (! file_exists($filePath)) {
-    //         abort(404, 'File not found');
-    //     }
+        $downloadName = 'payment_'.$payment->id.'.'.pathinfo($filePath, PATHINFO_EXTENSION);
 
-    //     return response()->download($filePath, $document->file_name);
-    // }
+        return response()->download($filePath, $downloadName);
+    }
 }
