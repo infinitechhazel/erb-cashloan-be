@@ -217,7 +217,7 @@ class PaymentController extends Controller
                 }
 
                 $extension = $file->getClientOriginalExtension();
-                $fileName = 'payment_'.$payment->id.'.'.$extension;
+                $fileName = 'payment_'.$validated['payment_id'].'.'.$extension;
 
                 // Move file to public/payment_proofs/
                 $file->move($folder, $fileName);
@@ -441,16 +441,20 @@ class PaymentController extends Controller
         }
     }
 
-    public function downloadProof(Payment $payment)
-    {
-        $this->authorize('view', $payment);
+    // public function downloadProof(Payment $payment, Proof $document)
+    // {
+    //     $this->authorize('view', $payment);
 
-        $filePath = public_path($payment->proof_of_payment);
+    //     if ($document->loan_id !== $payment->id) {
+    //         abort(404);
+    //     }
 
-        if (! file_exists($filePath)) {
-            abort(404, 'File not found');
-        }
+    //     $filePath = public_path($document->file_path);
 
-        return response()->download($filePath, basename($payment->proof_of_payment));
-    }
+    //     if (! file_exists($filePath)) {
+    //         abort(404, 'File not found');
+    //     }
+
+    //     return response()->download($filePath, $document->file_name);
+    // }
 }
