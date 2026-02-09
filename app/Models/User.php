@@ -124,7 +124,17 @@ class User extends Authenticatable implements MustVerifyEmail
     
     public function loans()
     {
+        return trim($this->first_name.' '.$this->last_name);
+    }
+
+    public function loans()
+    {
         // borrower_id is the correct foreign key in loans table
         return $this->hasMany(Loan::class, 'borrower_id');
+    }
+
+    public function payments()
+    {
+        return $this->hasMany(Payment::class);
     }
 }

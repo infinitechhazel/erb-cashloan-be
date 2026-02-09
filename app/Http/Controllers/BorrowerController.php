@@ -15,7 +15,7 @@ class BorrowerController extends Controller
     }
 
     /**
-     * List all borrowers (admins only, or filtered for other roles)
+     * List all borrowers (admins and lenders)
      */
 
     public function index(Request $request)
@@ -111,7 +111,7 @@ class BorrowerController extends Controller
 
 
     /**
-     * Show a specific borrower
+     * Show a specific borrower with all loans and payments
      */
     public function show(User $borrower)
     {
@@ -168,7 +168,11 @@ class BorrowerController extends Controller
         return response()->json([
             'borrower' => $data,
         ]);
+        return response()->json([
+            'borrower' => $data,
+        ]);
     }
+
 
     /**
      * Create a new borrower (admin only)
@@ -208,7 +212,7 @@ class BorrowerController extends Controller
         $validated = $request->validate([
             'first_name' => 'sometimes|string|max:255',
             'last_name' => 'sometimes|string|max:255',
-            'email' => 'sometimes|email|unique:users,email,' . $borrower->id,
+            'email' => 'sometimes|email|unique:users,email,'.$borrower->id,
             'password' => 'nullable|string|min:6|confirmed',
         ]);
 

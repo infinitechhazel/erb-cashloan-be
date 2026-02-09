@@ -11,7 +11,10 @@ class Loan extends Model
 {
     use HasFactory;
 
+    protected $appends = ['amount'];
+
     protected $fillable = [
+        'user_id',
         'borrower_id',
         'lender_id',
         'loan_officer_id',
@@ -21,6 +24,7 @@ class Loan extends Model
         'interest_rate',
         'term_months',
         'purpose',
+        'outstanding_balance',
         'employment_status',
         'status',
         'approved_at',
@@ -28,6 +32,7 @@ class Loan extends Model
         'rejection_reason',
         'start_date',
         'first_payment_date',
+        'disbursement_date',
         'notes',
     ];
 
@@ -35,6 +40,7 @@ class Loan extends Model
         'principal_amount' => 'decimal:2',
         'approved_amount' => 'decimal:2',
         'interest_rate' => 'decimal:2',
+        'outstanding_balance' => 'float',
         'term_months' => 'integer',
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',
@@ -169,5 +175,10 @@ class Loan extends Model
         $balance = $this->approved_amount - $totalPaid;
 
         return max(0, $balance);
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
     }
 }
