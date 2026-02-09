@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 
 class BorrowerController extends Controller
@@ -17,7 +16,6 @@ class BorrowerController extends Controller
     /**
      * List all borrowers (admins and lenders)
      */
-
     public function index(Request $request)
     {
         try {
@@ -34,8 +32,8 @@ class BorrowerController extends Controller
                 'role' => $user->role,
             ]);
 
-            // Start query
-            $query = User::query();
+            // Start query for borrowers
+            $query = User::where('role', 'borrower');
 
             // Apply search
             if ($search) {
@@ -67,7 +65,7 @@ class BorrowerController extends Controller
             $transformedData = $users->map(function ($user) {
                 return [
                     'id' => $user->id,
-                    'name' => $user->first_name . ' ' . $user->last_name,
+                    'name' => $user->first_name.' '.$user->last_name,
                     'email' => $user->email,
                     'phone' => $user->phone,
                     'profile_url' => $user->profile_picture,
@@ -109,7 +107,6 @@ class BorrowerController extends Controller
         }
     }
 
-
     /**
      * Show a specific borrower with all loans and payments
      */
@@ -118,7 +115,7 @@ class BorrowerController extends Controller
         $currentUser = auth()->user();
 
         // Only admins and lenders can view borrower
-        if (!in_array($currentUser->role, ['admin', 'lender'])) {
+        if (! in_array($currentUser->role, ['admin', 'lender'])) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
@@ -165,14 +162,8 @@ class BorrowerController extends Controller
             }),
         ];
 
-        return response()->json([
-            'borrower' => $data,
-        ]);
-        return response()->json([
-            'borrower' => $data,
-        ]);
+        return response()->json(['borrower' => $data]);
     }
-
 
     /**
      * Create a new borrower (admin only)
