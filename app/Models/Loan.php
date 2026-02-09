@@ -48,6 +48,8 @@ class Loan extends Model
         'first_payment_date' => 'date',
     ];
 
+    protected $appends = ['amount'];
+
     /**
      * Get the borrower (user) that owns the loan
      */
@@ -152,10 +154,29 @@ class Loan extends Model
         return $this->status === 'completed';
     }
 
+    /**
+     * Get amount accessor for compatibility
+     */
     public function getAmountAttribute(): string
     {
         return $this->principal_amount ?? '0.00';
     }
+
+    /**
+     * Get outstanding balance
+     */
+    public function getOutstandingBalanceAttribute()
+    {
+        if (!$this->isActive() && !$this->isCompleted()) {
+            return null;
+        }
+
+        $totalPaid = $this->payments()->where('status', 'completed')->sum('amount');
+        $balance = $this->approved_amount - $totalPaid;
+
+        return max(0, $balance);
+    }
+
     public function user()
     {
         return $this->belongsTo(User::class);
