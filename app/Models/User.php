@@ -14,11 +14,6 @@ class User extends Authenticatable implements MustVerifyEmail
 {
     use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
     protected $fillable = [
         'first_name',
         'last_name',
@@ -26,6 +21,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'password',
         'role',
         'phone',
+        'profile_url',
         'address',
         'city',
         'state',
@@ -35,32 +31,20 @@ class User extends Authenticatable implements MustVerifyEmail
         'is_active',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var array<int, string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
     ];
 
-    /**
-     * The attributes that should be cast.
-     *
-     * @var array<string, string>
-     */
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
         'is_active' => 'boolean',
+        'last_login_at' => 'datetime',
     ];
 
     /**
-     * IMPORTANT FIX: Append 'name' attribute to JSON serialization
-     * This makes $user->name available in API responses
-     *
-     * @var array<int, string>
+     * ✅ CRITICAL FIX: Always append 'name' to JSON
      */
     protected $appends = ['name'];
 
@@ -121,29 +105,26 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     /**
-     * IMPORTANT FIX: Changed from getFullNameAttribute to getNameAttribute
-     * This creates a 'name' attribute (not 'full_name')
-     * Now $user->name will work and appear in JSON as "name"
+     * ✅ ACCESSOR: Creates 'name' attribute from first_name + last_name
+     * This will automatically be included in JSON because of $appends
      */
     public function getNameAttribute(): string
     {
-        return trim($this->first_name . ' ' . $this->last_name);
+        return trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? ''));
     }
 
     /**
-     * Keep the full_name accessor for backwards compatibility
-     * if you're using it elsewhere in your code
+     * Backwards compatibility accessor
      */
     public function getFullNameAttribute(): string
     {
-        return $this->getName();
+        return $this->name;
     }
 
-    /**
-     * Helper method to get name (can be used by both accessors)
-     */
-    private function getName(): string
+    
+    public function loans()
     {
-        return trim($this->first_name . ' ' . $this->last_name);
+        // borrower_id is the correct foreign key in loans table
+        return $this->hasMany(Loan::class, 'borrower_id');
     }
 }

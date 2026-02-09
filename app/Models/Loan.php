@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Loan extends Model
 {
     use HasFactory;
-protected $appends = ['amount'];
+
     protected $fillable = [
         'borrower_id',
         'lender_id',
@@ -41,6 +41,8 @@ protected $appends = ['amount'];
         'start_date' => 'date',
         'first_payment_date' => 'date',
     ];
+
+    protected $appends = ['amount'];
 
     /**
      * Get the borrower (user) that owns the loan
@@ -145,8 +147,27 @@ protected $appends = ['amount'];
     {
         return $this->status === 'completed';
     }
+
+    /**
+     * Get amount accessor for compatibility
+     */
     public function getAmountAttribute(): string
-{
-    return $this->principal_amount ?? '0.00';
-}
+    {
+        return $this->principal_amount ?? '0.00';
+    }
+
+    /**
+     * Get outstanding balance
+     */
+    public function getOutstandingBalanceAttribute()
+    {
+        if (!$this->isActive() && !$this->isCompleted()) {
+            return null;
+        }
+
+        $totalPaid = $this->payments()->where('status', 'completed')->sum('amount');
+        $balance = $this->approved_amount - $totalPaid;
+
+        return max(0, $balance);
+    }
 }
