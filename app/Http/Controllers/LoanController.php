@@ -118,11 +118,17 @@ class LoanController extends Controller
 
     /**
      * Get all loans for authenticated user
-     * FIXED: Return loans as array instead of paginated object
+     * FIXED: Return loans as paginated object
      */
     public function index(Request $request)
     {
         try {
+            $perPage = $request->input('per_page', 10);
+            $search = $request->input('search', '');
+            $status = $request->input('status', 'all');
+            $sortBy = $request->input('sort_by', 'created_at');
+            $sortOrder = $request->input('sort_order', 'desc');
+
             /** @var User $user */
             $user = auth()->user();
 
@@ -135,39 +141,118 @@ class LoanController extends Controller
 
             if ($user->isAdmin()) {
                 $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents']);
+
+                if ($search) {
+                    $query->where(function ($q) use ($search) {
+                        if (is_numeric($search)) {
+                            $q->where('id', $search);
+                        } else {
+                            $q->where('type', 'like', "%{$search}%")
+                                ->orWhere('status', 'like', "%{$search}%")
+                                ->orWhereHas('borrower', function ($q2) use ($search) {
+                                    $q2->where('first_name', 'like', "%{$search}%")
+                                        ->orWhere('last_name', 'like', "%{$search}%")
+                                        ->orWhere('email', 'like', "%{$search}%");
+                                })
+                                ->orWhereHas('lender', function ($q2) use ($search) {
+                                    $q2->where('first_name', 'like', "%{$search}%")
+                                        ->orWhere('last_name', 'like', "%{$search}%");
+                                });
+                        }
+                    });
+                }
+
+                if ($status && $status !== 'all') {
+                    $query->where('status', $status);
+                }
+
+                $allowedSortFields = ['id', 'type', 'principal_amount', 'status', 'created_at'];
+                if (in_array($sortBy, $allowedSortFields)) {
+                    $query->orderBy($sortBy, $sortOrder);
+                } else {
+                    $query->orderBy('created_at', $sortOrder);
+                }
+
             } elseif ($user->isLender()) {
                 $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents'])
                     ->where(function ($q) use ($user) {
-                        // 1. All loans assigned to this loan officer (any status)
-                        $q->where('lender_id', $user->id)
-                          // 2. All unassigned pending loans
-                            ->orWhere(function ($q2) {
-                                $q2->where('status', 'pending');
+                        $q->whereIn('status', ['pending', 'approved'])
+                            ->whereNull('lender_id')
+                            ->orWhere(function ($q2) use ($user) {
+                                $q2->where('lender_id', $user->id)
+                                    ->whereIn('status', ['active', 'completed']);
                             });
                     });
+
+                if ($search) {
+                    $query->where(function ($q) use ($search) {
+                        if (is_numeric($search)) {
+                            $q->where('id', $search);
+                        } else {
+                            $q->whereHas('borrower', function ($q2) use ($search) {
+                                $q2->where('first_name', 'like', "%{$search}%")
+                                    ->orWhere('last_name', 'like', "%{$search}%");
+                            });
+                        }
+                    });
+                }
+
+                if ($status && $status !== 'all') {
+                    $query->where('status', $status);
+                }
 
             } elseif ($user->isLoanOfficer()) {
-                $query = Loan::with(['borrower', 'lender', 'loanOfficer', 'documents'])
-                    ->where(function ($q) use ($user) {
-                        // 1. All loans assigned to this loan officer (any status)
-                        $q->where('loan_officer_id', $user->id)
-                          // 2. All unassigned pending loans
-                            ->orWhere(function ($q2) {
-                                $q2->whereNull('loan_officer_id')
-                                    ->where('status', 'pending');
+                $query = Loan::where('loan_officer_id', $user->id)
+                    ->with(['borrower', 'lender', 'loanOfficer', 'documents']);
+
+                if ($search) {
+                    $query->where(function ($q) use ($search) {
+                        if (is_numeric($search)) {
+                            $q->where('id', $search);
+                        } else {
+                            $q->whereHas('borrower', function ($q2) use ($search) {
+                                $q2->where('first_name', 'like', "%{$search}%")
+                                    ->orWhere('last_name', 'like', "%{$search}%");
                             });
+                        }
                     });
+                }
+
+                if ($status && $status !== 'all') {
+                    $query->where('status', $status);
+                }
+
             } else {
-                // Borrower - show only their loans
+                // Borrower
                 $query = Loan::where('borrower_id', $user->id)
-                    ->with(['lender', 'loanOfficer', 'documents']);
+                    ->with(['borrower', 'lender', 'loanOfficer', 'documents']);
+
+                if ($search && is_numeric($search)) {
+                    $query->where('id', $search);
+                }
+
+                if ($status && $status !== 'all') {
+                    $query->where('status', $status);
+                }
             }
 
-            // Get all loans without pagination for simplicity
-            $loans = $query->orderBy('created_at', 'desc')->get();
+            // Paginate
+            $loans = $query->paginate($perPage);
+
+            Log::info('Loans fetched successfully', [
+                'count' => $loans->count(),
+                'total' => $loans->total(),
+                'user_id' => $user->id,
+            ]);
 
             return response()->json([
-                'loans' => $loans,
+                'data' => $loans->items(),
+                'current_page' => $loans->currentPage(),
+                'last_page' => $loans->lastPage(),
+                'per_page' => $loans->perPage(),
+                'total' => $loans->total(),
+                'from' => $loans->firstItem() ?? 0,
+                'to' => $loans->lastItem() ?? 0,
             ]);
 
         } catch (\Exception $e) {
@@ -178,10 +263,14 @@ class LoanController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Failed to fetch loans',
-                'error' => config('app.debug') ? $e->getMessage() : 'An error occurred',
-                'loans' => [], // Return empty array so frontend doesn't break
-            ], 500);
+                'data' => [],
+                'current_page' => 1,
+                'last_page' => 1,
+                'per_page' => $perPage ?? 10,
+                'total' => 0,
+                'from' => 0,
+                'to' => 0,
+            ], 200);
         }
     }
 
