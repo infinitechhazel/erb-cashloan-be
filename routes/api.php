@@ -94,9 +94,7 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // LEGACY/ADMIN Payment Routes
     Route::post('/payments', [PaymentController::class, 'recordPayment']); // Admin record payment
-
-    // Loan Officer 
-    Route::get('/loan-officers', [LoanOfficerController::class, 'index']);
+    Route::get('/payments', [PaymentController::class, 'adminIndex']);
 
     // Lenders
     Route::get('/lenders', [LenderController::class, 'index']);

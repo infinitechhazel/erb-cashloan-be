@@ -48,8 +48,6 @@ class Loan extends Model
         'first_payment_date' => 'date',
     ];
 
-    protected $appends = ['amount'];
-
     /**
      * Get the borrower (user) that owns the loan
      */
@@ -167,7 +165,7 @@ class Loan extends Model
      */
     public function getOutstandingBalanceAttribute()
     {
-        if (!$this->isActive() && !$this->isCompleted()) {
+        if (! $this->isActive() && ! $this->isCompleted()) {
             return null;
         }
 
