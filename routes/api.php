@@ -108,6 +108,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Borrower
     Route::get('/borrowers', [BorrowerController::class, 'index']);
     Route::get('/borrowers/{borrower}', [BorrowerController::class, 'show']);
+    Route::get('/borrowers/{borrower}/loans', [BorrowerController::class, 'show']);
     Route::get('/payments/upcoming', [PaymentController::class, 'upcoming']);
     Route::get('/payments/overdue', [PaymentController::class, 'overdue']);
     Route::get('/payments', [PaymentController::class, 'adminIndex']);

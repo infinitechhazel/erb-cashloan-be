@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -32,11 +34,24 @@ class AuthController extends Controller
 
         $token = $user->createToken('api-token')->plainTextToken;
 
+        // Set HTTP-only cookie
+        $cookie = cookie(
+            'token',                    // name
+            $token,                     // value
+            60 * 24 * 7,               // minutes (7 days)
+            '/',                        // path
+            null,                       // domain (null = current domain)
+            true,                       // secure (true for HTTPS)
+            true,                       // httpOnly
+            false,                      // raw
+            'lax'                       // sameSite
+        );
+
         return response()->json([
             'message' => 'User registered successfully',
             'user' => $user,
             'token' => $token,
-        ], 201);
+        ], 201)->cookie($cookie);
     }
 
     /**
@@ -51,7 +66,13 @@ class AuthController extends Controller
 
         $user = User::where('email', $credentials['email'])->first();
 
-        if (!$user || !Hash::check($credentials['password'], $user->password)) {
+        if (!$user) {
+            throw ValidationException::withMessages([
+                'email' => ['The user still not registered.'],
+            ]);
+        }
+
+        if (!Hash::check($credentials['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
@@ -62,11 +83,24 @@ class AuthController extends Controller
 
         $token = $user->createToken('api-token')->plainTextToken;
 
+        // Set HTTP-only cookie
+        $cookie = cookie(
+            'token',                    // name
+            $token,                     // value
+            60 * 24 * 7,               // minutes (7 days)
+            '/',                        // path
+            null,                       // domain (null = current domain)
+            true,                       // secure (true for HTTPS)
+            true,                       // httpOnly
+            false,                      // raw
+            'lax'                       // sameSite
+        );
+
         return response()->json([
             'message' => 'Login successful',
             'user' => $user,
             'token' => $token,
-        ]);
+        ])->cookie($cookie);
     }
 
     /**
@@ -86,9 +120,12 @@ class AuthController extends Controller
     {
         $request->user()->currentAccessToken()->delete();
 
+        // Delete the token cookie
+        $cookie = Cookie::forget('token');
+
         return response()->json([
             'message' => 'Logged out successfully',
-        ]);
+        ])->cookie($cookie);
     }
 
     /**
@@ -185,21 +222,6 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Password reset successful',
-        ]);
-    }
-
-    /**
-     * Get user profile with loans
-     */
-    public function profile(Request $request)
-    {
-        $user = $request->user();
-
-        $loans = $user->loans()->orderBy('created_at', 'desc')->get();
-
-        return response()->json([
-            'user' => $user,
-            'loans' => $loans,
         ]);
     }
 }
