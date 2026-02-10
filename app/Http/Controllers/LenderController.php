@@ -5,10 +5,12 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\User;
+use App\Models\Loan;
 use Illuminate\Support\Facades\Log;
 
 class LenderController extends Controller
 {
+
     public function index(Request $request)
     {
 
@@ -22,11 +24,11 @@ class LenderController extends Controller
 
 
         // Only admin can access
-        if ($user->role !== 'admin') {
-            return response()->json([
-                'message' => 'Unauthorized'
-            ], 403);
-        }
+        // if ($user->role !== 'admin') {
+        //     return response()->json([
+        //         'message' => 'Unauthorized'
+        //     ], 403);
+        // }
 
         $query = User::where('role', 'lender');
 
@@ -55,4 +57,31 @@ class LenderController extends Controller
             'lenders' => $lenders
         ]);
     }
+
+    public function dashboard(Request $request)
+    {
+        $user = $request->user();
+
+        // Only lender can access
+        if ($user->role !== 'lender') {
+            return response()->json([
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $loans = Loan::with('borrower')
+            ->where('lender_id', $user->id)
+            ->get();
+
+        return response()->json([
+            'user' => [
+                'id' => $user->id,
+                'first_name' => $user->first_name,
+                'last_name' => $user->last_name,
+                'email' => $user->email,
+            ],
+            'loans' => $loans,
+        ]);
+    }
+
 }

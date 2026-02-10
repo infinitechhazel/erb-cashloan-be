@@ -110,7 +110,7 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     public function getNameAttribute(): string
     {
-        return trim(($this->first_name ?? '').' '.($this->last_name ?? ''));
+        return trim(($this->first_name ?? '') . ' ' . ($this->last_name ?? ''));
     }
 
     /**
@@ -121,13 +121,10 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->name;
     }
 
-    public function loans(): HasMany
+    
+    public function loans()
     {
+        // borrower_id is the correct foreign key in loans table
         return $this->hasMany(Loan::class, 'borrower_id');
-    }
-
-    public function payments()
-    {
-        return $this->hasMany(Payment::class);
     }
 }

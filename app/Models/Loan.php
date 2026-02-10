@@ -11,8 +11,6 @@ class Loan extends Model
 {
     use HasFactory;
 
-    protected $appends = ['amount'];
-
     protected $fillable = [
         'user_id',
         'borrower_id',
@@ -27,12 +25,18 @@ class Loan extends Model
         'outstanding_balance',
         'employment_status',
         'status',
+        'notes',
         'approved_at',
         'rejected_at',
         'rejection_reason',
         'start_date',
         'first_payment_date',
-        'disbursement_date',
+
+        // ... existing fields
+        'receiver_wallet_name',
+        'receiver_wallet_number',
+        'receiver_wallet_email',
+        'receiver_wallet_proof',
         'notes',
     ];
 
@@ -47,6 +51,8 @@ class Loan extends Model
         'start_date' => 'date',
         'first_payment_date' => 'date',
     ];
+
+    protected $appends = ['amount'];
 
     /**
      * Get the borrower (user) that owns the loan
@@ -165,7 +171,7 @@ class Loan extends Model
      */
     public function getOutstandingBalanceAttribute()
     {
-        if (! $this->isActive() && ! $this->isCompleted()) {
+        if (!$this->isActive() && !$this->isCompleted()) {
             return null;
         }
 
@@ -173,10 +179,5 @@ class Loan extends Model
         $balance = $this->approved_amount - $totalPaid;
 
         return max(0, $balance);
-    }
-
-    public function user()
-    {
-        return $this->belongsTo(User::class);
     }
 }

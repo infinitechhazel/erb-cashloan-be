@@ -59,12 +59,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/loans/{loan}/activate', [LoanController::class, 'activate']);
 
     // Document download
+    Route::get('/loans/{loan}/documents', [LoanController::class, 'indexDocument']);
     Route::get('/loans/{loan}/documents/{document}/download', [LoanController::class, 'downloadDocument']);
 
+    // Get wallet info for a specific loan
+    Route::get('/loans/{loan}/wallet', [LoanController::class, 'getWalletInfo']);
+
+    // Update wallet info (for lender/admin)
+    Route::post('/loans/{loan}/wallet', [LoanController::class, 'updateWalletInfo']);
+   
+   
     // ========================================
     // PAYMENT ROUTES - Organized by user type
     // ========================================
-    
+
     // LENDER Payment Routes (for viewing/managing payments)
     Route::prefix('lender')->group(function () {
         Route::get('/payments', [PaymentController::class, 'indexForLender']);
@@ -74,27 +82,25 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/payments/rejected', [PaymentController::class, 'rejectedForLender']);
         Route::get('/payments/paid', [PaymentController::class, 'paidForLender']);
     });
-    
+
     // BORROWER Payment Routes (for submitting payments)
     Route::prefix('borrower')->group(function () {
         Route::post('/payments', [PaymentController::class, 'store']);
         Route::get('/payments', [PaymentController::class, 'indexForBorrower']);
     });
-    
+
     // GENERAL Payment Routes (accessible by multiple roles)
     Route::get('/payments/upcoming', [PaymentController::class, 'upcoming']); // Keep for backward compatibility
     Route::get('/payments/overdue', [PaymentController::class, 'overdue']); // Keep for backward compatibility
-    Route::post('/payments/{payment}/verify', [PaymentController::class, 'verify']); // Lenders verify payments
-    Route::get('/payments/{payment}/proof/download', [PaymentController::class, 'downloadProof']); // Download proof
-    Route::get('/payments/{payment}', [PaymentController::class, 'show']); // View single payment
-    
+
     // LOAN-SPECIFIC Payment Routes
     Route::get('/loans/{loan}/payments', [PaymentController::class, 'index']); // Get payments for a specific loan
     Route::post('/loans/{loan}/payments', [PaymentController::class, 'store']); // Create payment for a loan (deprecated, use /borrower/payments)
-    
+
     // LEGACY/ADMIN Payment Routes
-    Route::post('/payments', [PaymentController::class, 'recordPayment']); // Admin record payment
-    Route::get('/payments', [PaymentController::class, 'adminIndex']);
+
+    // Loan Officer 
+    Route::get('/loan-officers', [LoanOfficerController::class, 'index']);
 
     // Lenders
     Route::get('/lenders', [LenderController::class, 'index']);
@@ -102,6 +108,17 @@ Route::middleware('auth:sanctum')->group(function () {
     // Borrower
     Route::get('/borrowers', [BorrowerController::class, 'index']);
     Route::get('/borrowers/{borrower}', [BorrowerController::class, 'show']);
+    Route::get('/borrowers/{borrower}/loans', [BorrowerController::class, 'show']);
+    Route::get('/payments/upcoming', [PaymentController::class, 'upcoming']);
+    Route::get('/payments/overdue', [PaymentController::class, 'overdue']);
+    Route::get('/payments', [PaymentController::class, 'adminIndex']);
+    Route::post('/payments', [PaymentController::class, 'recordPayment']);
+    Route::post('/payments/{payment}/verify', [PaymentController::class, 'verifyPayment']);
+    Route::get('/loans/{loan}/payments', [PaymentController::class, 'index']);
+    Route::post('/loans/{loan}/payments', [PaymentController::class, 'store']);
+    Route::get('/payments/{payment}', [PaymentController::class, 'show']);
+    Route::get('/payments/{payment}/proof/download', [PaymentController::class, 'downloadProof']);
+    Route::get('/payments/borrowers/', [PaymentController::class, 'indexByBorrower']);
 
     // User profile routes
     Route::prefix('settings')->group(function () {

@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
+use App\Models\User;
 
 class SettingsController extends Controller
 {
@@ -33,7 +35,7 @@ class SettingsController extends Controller
                 'state' => $request->user()->state,
                 'postal_code' => $request->user()->postal_code,
                 'country' => $request->user()->country,
-            ],
+            ]
         ]);
     }
 
@@ -54,7 +56,7 @@ class SettingsController extends Controller
             if ($validator->fails()) {
                 return response()->json([
                     'message' => 'Validation failed',
-                    'errors' => $validator->errors(),
+                    'errors' => $validator->errors()
                 ], 422);
             }
 
@@ -66,8 +68,8 @@ class SettingsController extends Controller
                 return response()->json([
                     'message' => 'Validation failed',
                     'errors' => [
-                        'profile_url' => ['The uploaded file is not a valid image.'],
-                    ],
+                        'profile_url' => ['The uploaded file is not a valid image.']
+                    ]
                 ], 422);
             }
 
@@ -92,17 +94,17 @@ class SettingsController extends Controller
             }
 
             // Store new image directly in public/profiles
-            $filename = time().'_'.uniqid().'.'.$file->getClientOriginalExtension();
+            $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
             $file->move(public_path('profiles'), $filename);
 
-            $user->profile_url = 'profiles/'.$filename;
+            $user->profile_url = 'profiles/' . $filename;
             $user->save();
 
             return response()->json([
                 'message' => 'Profile image updated successfully',
                 'data' => [
-                    'profile_url' => asset($user->profile_url), // Return public URL
-                ],
+                    'profile_url' => asset($user->profile_url) // Return public URL
+                ]
             ]);
         }
 
@@ -120,8 +122,8 @@ class SettingsController extends Controller
             return response()->json([
                 'message' => 'Profile image removed successfully',
                 'data' => [
-                    'profile_url' => null,
-                ],
+                    'profile_url' => null
+                ]
             ]);
         }
 
@@ -139,7 +141,7 @@ class SettingsController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'message' => 'Validation failed',
-                'errors' => $validator->errors(),
+                'errors' => $validator->errors()
             ], 422);
         }
 
@@ -159,40 +161,33 @@ class SettingsController extends Controller
                 'state' => $user->state,
                 'postal_code' => $user->postal_code,
                 'country' => $user->country,
-            ],
+            ]
         ]);
     }
 
+
     public function updateContact(Request $request)
     {
-        $user = $request->user();
-        logger('UpdateContact request payload', $request->all());
         $validator = Validator::make($request->all(), [
-            'first_name' => 'required|string|max:255',
-            'last_name' => 'required|string|max:255',
-            'phone' => 'required|regex:/^[0-9]{11}$/',
-            'address' => 'required|string|max:500',
+            'email' => 'email|unique:users,email,' . $request->user()->id,
+            'phone' => 'regex:/^[0-9]{11}$/',
         ], [
+            'email.unique' => 'This email address is already in use.',
             'phone.regex' => 'Phone number must be exactly 11 digits.',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
                 'message' => 'Validation failed',
-                'errors' => $validator->errors(),
+                'errors' => $validator->errors()
             ], 422);
         }
 
-        $user->update([
-            'first_name' => $request->first_name,
-            'last_name' => $request->last_name,
-            'phone' => $request->phone,
-            'address' => $request->address,
-        ]);
+        $request->user()->update($request->only(['email', 'phone']));
 
         return response()->json([
             'message' => 'Contact information updated successfully',
-            'data' => $user,
+            'data' => $request->user()
         ]);
     }
 
@@ -208,7 +203,7 @@ class SettingsController extends Controller
                 'regex:/[A-Z]/',      // at least one uppercase
                 'regex:/[0-9]/',      // at least one digit
                 'regex:/[@$!%*#?&]/', // at least one special char
-                'confirmed',
+                'confirmed'
             ],
         ], [
             'new_password.min' => 'Password must be at least 8 characters.',
@@ -219,23 +214,23 @@ class SettingsController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'message' => 'Validation failed',
-                'errors' => $validator->errors(),
+                'errors' => $validator->errors()
             ], 422);
         }
 
         $user = $request->user();
 
         // Verify current password
-        if (! Hash::check($request->current_password, $user->password)) {
+        if (!Hash::check($request->current_password, $user->password)) {
             return response()->json([
-                'message' => 'Current password is incorrect',
+                'message' => 'Current password is incorrect'
             ], 422);
         }
 
         // Check if new password is different
         if (Hash::check($request->new_password, $user->password)) {
             return response()->json([
-                'message' => 'New password must be different from current password',
+                'message' => 'New password must be different from current password'
             ], 422);
         }
 
@@ -244,7 +239,7 @@ class SettingsController extends Controller
         $user->save();
 
         return response()->json([
-            'message' => 'Password changed successfully',
+            'message' => 'Password changed successfully'
         ]);
     }
 }

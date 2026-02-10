@@ -27,7 +27,7 @@ class PaymentController extends Controller
     /**
      * Get all payments for the authenticated lender
      * GET /api/lender/payments
-     *
+     * 
      * FIXED: Using direct JOIN instead of whereHas for better performance and reliability
      */
     public function indexForLender(Request $request)
@@ -98,7 +98,7 @@ class PaymentController extends Controller
             }
 
             // Search functionality
-            if ($request->has('search') && ! empty($request->search)) {
+            if ($request->has('search') && !empty($request->search)) {
                 $search = $request->search;
                 $query->where(function ($q) use ($search) {
                     $q->where('payments.transaction_id', 'like', "%{$search}%")
@@ -175,8 +175,8 @@ class PaymentController extends Controller
                             'first_name' => $payment->borrower_first_name,
                             'last_name' => $payment->borrower_last_name,
                             'email' => $payment->borrower_email,
-                        ],
-                    ],
+                        ]
+                    ]
                 ];
             });
 
@@ -184,15 +184,15 @@ class PaymentController extends Controller
             $response = [
                 'current_page' => $page,
                 'data' => $transformedPayments,
-                'first_page_url' => $request->url().'?page=1',
+                'first_page_url' => $request->url() . '?page=1',
                 'from' => $offset + 1,
                 'last_page' => (int) ceil($total / $perPage),
-                'last_page_url' => $request->url().'?page='.ceil($total / $perPage),
+                'last_page_url' => $request->url() . '?page=' . ceil($total / $perPage),
                 'links' => [],
-                'next_page_url' => $page < ceil($total / $perPage) ? $request->url().'?page='.($page + 1) : null,
+                'next_page_url' => $page < ceil($total / $perPage) ? $request->url() . '?page=' . ($page + 1) : null,
                 'path' => $request->url(),
                 'per_page' => $perPage,
-                'prev_page_url' => $page > 1 ? $request->url().'?page='.($page - 1) : null,
+                'prev_page_url' => $page > 1 ? $request->url() . '?page=' . ($page - 1) : null,
                 'to' => min($offset + $perPage, $total),
                 'total' => $total,
             ];
@@ -200,18 +200,17 @@ class PaymentController extends Controller
             Log::info('Lender payments fetched successfully', [
                 'total' => $total,
                 'page' => $page,
-                'per_page' => $perPage,
+                'per_page' => $perPage
             ]);
 
             return response()->json($response);
 
         } catch (\Exception $e) {
-            Log::error('Error fetching lender payments: '.$e->getMessage());
-            Log::error('Stack trace: '.$e->getTraceAsString());
-
+            Log::error('Error fetching lender payments: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
             return response()->json([
                 'message' => 'Failed to fetch payments',
-                'error' => $e->getMessage(),
+                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -232,7 +231,6 @@ class PaymentController extends Controller
             ->where('due_date', '>=', now());
 
         $perPage = $request->input('per_page', 10);
-
         return response()->json($query->paginate($perPage));
     }
 
@@ -257,7 +255,6 @@ class PaymentController extends Controller
             });
 
         $perPage = $request->input('per_page', 10);
-
         return response()->json($query->paginate($perPage));
     }
 
@@ -276,7 +273,6 @@ class PaymentController extends Controller
             ->where('status', 'awaiting_verification');
 
         $perPage = $request->input('per_page', 10);
-
         return response()->json($query->paginate($perPage));
     }
 
@@ -295,7 +291,6 @@ class PaymentController extends Controller
             ->where('status', 'rejected');
 
         $perPage = $request->input('per_page', 10);
-
         return response()->json($query->paginate($perPage));
     }
 
@@ -314,7 +309,6 @@ class PaymentController extends Controller
             ->where('status', 'paid');
 
         $perPage = $request->input('per_page', 10);
-
         return response()->json($query->paginate($perPage));
     }
 
@@ -324,16 +318,187 @@ class PaymentController extends Controller
      */
     public function indexForBorrower(Request $request)
     {
-        $user = $request->user();
+        try {
+            $user = $request->user();
 
-        $query = Payment::with(['loan'])
-            ->whereHas('loan', function ($q) use ($user) {
-                $q->where('borrower_id', $user->id);
+            Log::info('Fetching payments for borrower', ['borrower_id' => $user->id]);
+
+            // FIXED: Use direct JOIN approach - more reliable and performant
+            $query = DB::table('payments')
+                ->join('loans', 'payments.loan_id', '=', 'loans.id')
+                ->join('users as borrowers', 'loans.borrower_id', '=', 'borrowers.id')
+                ->where('loans.borrower_id', $user->id)
+                ->select(
+                    'payments.*',
+                    'loans.id as loan_id_full',
+                    'loans.type as loan_type',
+                    'loans.principal_amount',
+                    'loans.approved_amount',
+                    'loans.interest_rate',
+                    'loans.status as loan_status',
+                    'loans.term_months',
+                    'loans.purpose',
+                    'loans.outstanding_balance',
+                    DB::raw('CONCAT(borrowers.first_name, " ", borrowers.last_name) as borrower_name'),
+                    'borrowers.email as borrower_email',
+                    'borrowers.first_name as borrower_first_name',
+                    'borrowers.last_name as borrower_last_name'
+                );
+
+            // Filter by type/status
+            if ($request->has('type') && $request->type !== 'all') {
+                $type = $request->type;
+
+                switch ($type) {
+                    case 'upcoming':
+                        $query->where('payments.status', 'pending')
+                            ->where('payments.due_date', '>=', now());
+                        break;
+
+                    case 'overdue':
+                        $query->where(function ($q) {
+                            $q->whereIn('payments.status', ['late', 'missed'])
+                                ->orWhere(function ($subQ) {
+                                    $subQ->where('payments.status', 'pending')
+                                        ->where('payments.due_date', '<', now());
+                                });
+                        });
+                        break;
+
+                    case 'awaiting_verification':
+                        $query->where('payments.status', 'awaiting_verification');
+                        break;
+
+                    case 'rejected':
+                        $query->where('payments.status', 'rejected');
+                        break;
+
+                    case 'paid':
+                        $query->where('payments.status', 'paid');
+                        break;
+
+                    default:
+                        $query->where('payments.status', $type);
+                        break;
+                }
+            }
+
+            // Search functionality
+            if ($request->has('search') && !empty($request->search)) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->where('payments.transaction_id', 'like', "%{$search}%")
+                        ->orWhere('payments.loan_id', 'like', "%{$search}%")
+                        ->orWhere('borrowers.first_name', 'like', "%{$search}%")
+                        ->orWhere('borrowers.last_name', 'like', "%{$search}%")
+                        ->orWhereRaw("CONCAT(borrowers.first_name, ' ', borrowers.last_name) LIKE ?", ["%{$search}%"]);
+                });
+            }
+
+            // Sorting
+            $sortField = $request->input('sort_field', 'due_date');
+            $sortOrder = $request->input('sort_order', 'asc');
+
+            // Map frontend field names to database columns
+            $fieldMapping = [
+                'id' => 'payments.id',
+                'transaction_id' => 'payments.transaction_id',
+                'amount' => 'payments.amount',
+                'due_date' => 'payments.due_date',
+                'status' => 'payments.status',
+                'created_at' => 'payments.created_at',
+                'loan_id' => 'payments.loan_id',
+            ];
+
+            $dbSortField = $fieldMapping[$sortField] ?? 'payments.due_date';
+            $query->orderBy($dbSortField, $sortOrder);
+
+            // Get total count before pagination
+            $total = $query->count();
+
+            // Pagination
+            $perPage = (int) $request->input('per_page', 10);
+            $page = (int) $request->input('page', 1);
+            $offset = ($page - 1) * $perPage;
+
+            $payments = $query->offset($offset)->limit($perPage)->get();
+
+            // Transform the results to match expected structure
+            $transformedPayments = $payments->map(function ($payment) {
+                return [
+                    'id' => $payment->id,
+                    'loan_id' => $payment->loan_id,
+                    'transaction_id' => $payment->transaction_id,
+                    'amount' => $payment->amount,
+                    'principal_amount' => $payment->principal_amount ?? null,
+                    'interest_amount' => $payment->interest_amount ?? null,
+                    'due_date' => $payment->due_date,
+                    'payment_date' => $payment->payment_date,
+                    'paid_date' => $payment->paid_date,
+                    'status' => $payment->status,
+                    'payment_method' => $payment->payment_method,
+                    'proof_of_payment' => $payment->proof_of_payment,
+                    'verified_at' => $payment->verified_at,
+                    'verified_by' => $payment->verified_by,
+                    'rejection_reason' => $payment->rejection_reason,
+                    'notes' => $payment->notes,
+                    'late_fee' => $payment->late_fee ?? '0.00',
+                    'days_late' => $payment->days_late ?? 0,
+                    'created_at' => $payment->created_at,
+                    'updated_at' => $payment->updated_at,
+                    'loan' => [
+                        'id' => $payment->loan_id,
+                        'type' => $payment->loan_type,
+                        'principal_amount' => $payment->principal_amount,
+                        'approved_amount' => $payment->approved_amount,
+                        'interest_rate' => $payment->interest_rate,
+                        'status' => $payment->loan_status,
+                        'term_months' => $payment->term_months,
+                        'purpose' => $payment->purpose,
+                        'outstanding_balance' => $payment->outstanding_balance,
+                        'borrower' => [
+                            'name' => $payment->borrower_name,
+                            'first_name' => $payment->borrower_first_name,
+                            'last_name' => $payment->borrower_last_name,
+                            'email' => $payment->borrower_email,
+                        ]
+                    ]
+                ];
             });
 
-        $perPage = $request->input('per_page', 10);
+            // Build pagination response
+            $response = [
+                'current_page' => $page,
+                'data' => $transformedPayments,
+                'first_page_url' => $request->url() . '?page=1',
+                'from' => $offset + 1,
+                'last_page' => (int) ceil($total / $perPage),
+                'last_page_url' => $request->url() . '?page=' . ceil($total / $perPage),
+                'links' => [],
+                'next_page_url' => $page < ceil($total / $perPage) ? $request->url() . '?page=' . ($page + 1) : null,
+                'path' => $request->url(),
+                'per_page' => $perPage,
+                'prev_page_url' => $page > 1 ? $request->url() . '?page=' . ($page - 1) : null,
+                'to' => min($offset + $perPage, $total),
+                'total' => $total,
+            ];
 
-        return response()->json($query->paginate($perPage));
+            Log::info('Lender payments fetched successfully', [
+                'total' => $total,
+                'page' => $page,
+                'per_page' => $perPage
+            ]);
+
+            return response()->json($response);
+
+        } catch (\Exception $e) {
+            Log::error('Error fetching lender payments: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return response()->json([
+                'message' => 'Failed to fetch payments',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -352,7 +517,7 @@ class PaymentController extends Controller
         // Check if the payment belongs to a loan managed by this lender
         if ($payment->loan->lender_id !== $user->id) {
             return response()->json([
-                'message' => 'Unauthorized to verify this payment',
+                'message' => 'Unauthorized to verify this payment'
             ], 403);
         }
 
@@ -385,6 +550,42 @@ class PaymentController extends Controller
                 'payment' => $payment->fresh(['loan.borrower']),
             ]);
         }
+    }
+
+    /**
+     * Download payment proof
+     * GET /api/payments/{payment}/proof/download
+     */
+    public function downloadProof(Request $request, Payment $payment)
+    {
+        $user = $request->user();
+
+        // Check authorization - either lender or borrower
+        $isLender = $payment->loan->lender_id === $user->id;
+        $isBorrower = $payment->loan->borrower_id === $user->id;
+
+        if (!$isLender && !$isBorrower) {
+            return response()->json([
+                'message' => 'Unauthorized to access this payment proof'
+            ], 403);
+        }
+
+        if (!$payment->proof_of_payment) {
+            return response()->json([
+                'message' => 'No proof of payment available'
+            ], 404);
+        }
+
+        $filePath = $payment->proof_of_payment;
+
+        // Check if file exists
+        if (!Storage::disk('public')->exists($filePath)) {
+            return response()->json([
+                'message' => 'File not found'
+            ], 404);
+        }
+
+        return Storage::disk('public')->download($filePath);
     }
 
     // ========================================
@@ -502,14 +703,14 @@ class PaymentController extends Controller
     /**
      * Record a payment (for a specific loan)
      */
-    public function store(Request $request, ?Loan $loan = null)
+    public function store(Request $request, Loan $loan = null)
     {
-        // If loan is provided (from route), use existing logic
+        // SCENARIO 1: Admin/Staff making payment for a loan (existing logic)
         if ($loan) {
             $this->authorize('pay', $loan);
 
             $validated = $request->validate([
-                'payment_method' => 'required|in:credit_card,debit_card,bank_transfer,check',
+                'payment_method' => 'required|in:credit_card,debit_card,bank_transfer,check,ewallet',
                 'transaction_id' => 'sometimes|string|max:100',
             ]);
 
@@ -519,7 +720,7 @@ class PaymentController extends Controller
                 ->orderBy('due_date')
                 ->first();
 
-            if (! $payment) {
+            if (!$payment) {
                 return response()->json([
                     'message' => 'No pending payments for this loan',
                 ], 422);
@@ -539,15 +740,35 @@ class PaymentController extends Controller
             ]);
         }
 
-        // New logic for borrower submitting payment with proof
-        $request->validate([
-            'loan_id' => 'required|exists:loans,id',
-            'amount' => 'required|numeric|min:0',
-            'payment_method' => 'required|string',
-            'payment_date' => 'required|date',
-            'proof_of_payment' => 'required|file|mimes:jpg,jpeg,png,pdf|max:5120',
-            'notes' => 'nullable|string|max:500',
-        ]);
+        // SCENARIO 2 & 3: Borrower submitting payment
+        // Check if this is from payment history (has payment_number or notes indicating scheduled payment)
+        $isScheduledPayment = $request->has('notes') &&
+            str_contains($request->notes ?? '', 'Payment ');
+
+        // Validate based on scenario
+        if ($isScheduledPayment) {
+            // Payment History - allow image to be optional
+            $request->validate([
+                'loan_id' => 'required|exists:loans,id',
+                'amount' => 'required|numeric|min:0',
+                'payment_method' => 'required|string|in:ewallet,bank_transfer,credit_card,debit_card,cash',
+                'payment_date' => 'required|date',
+                'proof_of_payment' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:10240', // 10MB
+                'notes' => 'nullable|string|max:500',
+                'payment_number' => 'nullable|integer',
+                'payment_details' => 'nullable|json',
+            ]);
+        } else {
+            // Regular borrower payment - require proof
+            $request->validate([
+                'loan_id' => 'required|exists:loans,id',
+                'amount' => 'required|numeric|min:0',
+                'payment_method' => 'required|string',
+                'payment_date' => 'required|date',
+                'proof_of_payment' => 'required|file|mimes:jpg,jpeg,png,pdf|max:5120',
+                'notes' => 'nullable|string|max:500',
+            ]);
+        }
 
         $user = $request->user();
 
@@ -555,8 +776,15 @@ class PaymentController extends Controller
         $loan = Loan::findOrFail($request->loan_id);
         if ($loan->borrower_id !== $user->id) {
             return response()->json([
-                'message' => 'Unauthorized to submit payment for this loan',
+                'message' => 'Unauthorized to submit payment for this loan'
             ], 403);
+        }
+
+        // Verify loan is active
+        if (!in_array($loan->status, ['active', 'approved', 'disbursed'])) {
+            return response()->json([
+                'message' => 'Cannot make payment for inactive loan'
+            ], 400);
         }
 
         // Store proof of payment
@@ -566,22 +794,80 @@ class PaymentController extends Controller
                 ->store('payment-proofs', 'public');
         }
 
-        $payment = Payment::create([
-            'loan_id' => $request->loan_id,
-            'amount' => $request->amount,
-            'payment_method' => $request->payment_method,
-            'payment_date' => $request->payment_date,
-            'proof_of_payment' => $proofPath,
-            'notes' => $request->notes,
-            'status' => 'awaiting_verification',
-            'transaction_id' => 'TXN-'.strtoupper(uniqid()),
-            'due_date' => $request->due_date ?? now(),
-        ]);
+        // Parse payment details if provided
+        $paymentDetails = null;
+        if ($request->has('payment_details')) {
+            $paymentDetails = is_string($request->payment_details)
+                ? json_decode($request->payment_details, true)
+                : $request->payment_details;
+        }
 
-        return response()->json([
-            'message' => 'Payment submitted successfully',
-            'payment' => $payment->load('loan'),
-        ], 201);
+        // Determine status based on payment method and proof
+        $status = 'awaiting_verification';
+        if ($proofPath || $request->payment_method === 'credit_card') {
+            // If proof is provided or credit card (instant), mark as pending verification
+            $status = 'awaiting_verification';
+        }
+
+        DB::beginTransaction();
+
+        try {
+            // Create payment record
+            $payment = Payment::create([
+                'loan_id' => $request->loan_id,
+                'amount' => $request->amount,
+                'payment_method' => $request->payment_method,
+                'payment_date' => $request->payment_date,
+                'payment_number' => $request->payment_number ?? null,
+                'proof_of_payment' => $proofPath,
+                'notes' => $request->notes,
+                'payment_details' => $paymentDetails,
+                'status' => $status,
+                'transaction_id' => 'TXN-' . strtoupper(uniqid()),
+                'due_date' => $request->due_date ?? now(),
+            ]);
+
+            // Optional: Auto-approve for certain payment methods or if admin setting is enabled
+            $autoApprove = config('payments.auto_approve', false);
+            if ($autoApprove && $proofPath) {
+                $payment->status = 'completed';
+                $payment->verified_at = now();
+                $payment->verified_by = $user->id;
+                $payment->save();
+
+                // Update loan balance
+                $loan->outstanding_balance = max(0, $loan->outstanding_balance - $payment->amount);
+
+                // Check if loan is fully paid
+                if ($loan->outstanding_balance <= 0) {
+                    $loan->status = 'completed';
+                    $loan->completed_at = now();
+                }
+
+                $loan->save();
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Payment submitted successfully',
+                'payment' => $payment->load('loan'),
+                'loan' => $loan->fresh(),
+                'status' => $payment->status,
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            // Delete uploaded file if transaction failed
+            if ($proofPath) {
+                Storage::disk('public')->delete($proofPath);
+            }
+
+            return response()->json([
+                'message' => 'Failed to process payment: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -591,8 +877,11 @@ class PaymentController extends Controller
     {
         try {
             $user = auth()->user();
-            if (! $user) {
-                return response()->json(['message' => 'Unauthenticated'], 401);
+
+            if (!$user) {
+                return response()->json([
+                    'message' => 'Unauthenticated',
+                ], 401);
             }
 
             // Validate input
@@ -625,6 +914,8 @@ class PaymentController extends Controller
 
                 // Create payment
                 $paymentColumns = Schema::getColumnListing('payments');
+
+                // Build payment data based on available columns
                 $paymentData = [
                     'loan_id' => $loan->id,
                     'amount' => $validated['amount'],
@@ -636,35 +927,36 @@ class PaymentController extends Controller
                 if (in_array('payment_date', $paymentColumns)) {
                     $paymentData['payment_date'] = now();
                 }
+
                 if (in_array('transaction_id', $paymentColumns)) {
                     $paymentData['transaction_id'] = 'TXN-'.strtoupper(uniqid());
                 }
+
                 if (in_array('reference_number', $paymentColumns)) {
                     $paymentData['reference_number'] = 'REF-'.strtoupper(uniqid());
                 }
 
                 $payment = Payment::create($paymentData);
 
-                // Handle proof_of_payment upload
-                $file = $request->file('proof_of_payment');
-                $folder = public_path("payment_proofs/{$payment->id}");
+                // Update loan balance
+                $currentBalance = floatval($loan->outstanding_balance ?? $loan->amount);
+                $newBalance = max(0, $currentBalance - floatval($validated['amount']));
 
-                if (! File::exists($folder)) {
-                    File::makeDirectory($folder, 0755, true); // recursive & writable
+                // Get available columns in loans table
+                $loanColumns = Schema::getColumnListing('loans');
+
+                if (in_array('outstanding_balance', $loanColumns)) {
+                    $loan->outstanding_balance = $newBalance;
                 }
 
-                $extension = $file->getClientOriginalExtension();
-                $fileName = 'payment_proof.'.$extension;
-
-                // Move file to public/payment_proofs/
-                $file->move($folder, $fileName);
-
-                // Relative path for DB
-                $proofPath = "payment_proofs/{$payment->id}/{$fileName}";
-
-                if (in_array('proof_of_payment', $paymentColumns)) {
-                    $payment->update(['proof_of_payment' => $proofPath]);
+                // ONLY mark loan as completed if balance is 0 or very close to 0 (accounting for floating point)
+                if ($newBalance <= 0.01) {
+                    $loan->status = 'completed';
                 }
+                // Otherwise keep it active
+                // DO NOT change status if there's still balance remaining
+
+                $loan->save();
 
                 DB::commit();
 
@@ -744,13 +1036,18 @@ class PaymentController extends Controller
         try {
             $user = auth()->user();
 
-            if (! $user) {
+            if (!$user) {
                 return response()->json([
                     'message' => 'Unauthenticated',
                 ], 401);
             }
 
             $days = (int) $request->input('days', 30);
+
+            Log::info('Fetching upcoming payments', [
+                'user_id' => $user->id,
+                'days' => $days
+            ]);
 
             // Check if the method exists
             if (! method_exists($this->loanService, 'getUpcomingPayments')) {
@@ -798,7 +1095,7 @@ class PaymentController extends Controller
         try {
             $user = auth()->user();
 
-            if (! $user) {
+            if (!$user) {
                 return response()->json([
                     'message' => 'Unauthenticated',
                 ], 401);

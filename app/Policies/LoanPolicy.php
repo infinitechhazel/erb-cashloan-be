@@ -5,6 +5,7 @@ namespace App\Policies;
 use App\Models\Loan;
 use App\Models\User;
 use Illuminate\Auth\Access\HandlesAuthorization;
+use Illuminate\Support\Facades\Log;
 
 class LoanPolicy
 {
@@ -39,6 +40,43 @@ class LoanPolicy
         }
 
         // Loan officers can view loans they're assigned to
+        if ($user->isLoanOfficer() && $loan->loan_officer_id === $user->id) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Determine whether the user can view loan documents.
+     * Same permissions as viewing the loan itself.
+     */
+    public function viewDocuments(User $user, Loan $loan): bool
+    {
+        // Admins can view all loan documents
+        if ($user->isAdmin()) {
+            return true;
+        }
+
+        // Borrowers can view their own loan documents
+        if ($user->isBorrower() && $loan->borrower_id === $user->id) {
+            return true;
+        }
+
+        // For lenders
+        if ($user->isLender()) {
+            // Assigned lender can always view
+            if ($loan->lender_id === $user->id) {
+                return true;
+            }
+
+            // ANY lender can view pending or approved loans (for review/assignment)
+            if (in_array($loan->status, ['pending', 'approved'])) {
+                return true;
+            }
+        }
+
+        // Loan officers can view loan documents they're assigned to
         if ($user->isLoanOfficer() && $loan->loan_officer_id === $user->id) {
             return true;
         }

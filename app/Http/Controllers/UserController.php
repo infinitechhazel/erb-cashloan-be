@@ -16,7 +16,7 @@ class UserController extends Controller
         try {
             $perPage = $request->input('per_page', 10);
             $search = $request->input('search', '');
-            $role = $request->input('role', 'all');
+            $status = $request->input('status', 'all');
             $sortBy = $request->input('sort_by', 'created_at');
             $sortOrder = $request->input('sort_order', 'desc');
 
@@ -40,8 +40,8 @@ class UserController extends Controller
                 });
             }
 
-            // Apply role filter
-            if ($role && $role !== 'all') {
+            // Apply status filter
+            if ($status && $status !== 'all') {
                 $query->where('status', $status);
             }
 
@@ -60,12 +60,11 @@ class UserController extends Controller
             $transformedData = $users->map(function ($user) {
                 return [
                     'id' => $user->id,
-                    'name' => $user->first_name.' '.$user->last_name,
+                    'name' => $user->first_name . ' ' . $user->last_name,
                     'email' => $user->email,
                     'phone' => $user->phone,
                     'profile_url' => $user->profile_picture,
-                    'is_active' => $user->is_active,
-                    'role' => $user->role,
+                    'status' => $user->status,
                     'created_at' => $user->created_at,
                 ];
             });
@@ -110,7 +109,7 @@ class UserController extends Controller
     {
         try {
             $user = User::findOrFail($id);
-            Log::info('Fetching profile for user ID: '.$request->user()->id);
+            Log::info('Fetching profile for user ID: ' . $request->user()->id);
             $user = User::find($request->user()->id);
 
             Log::info('Fetching users', [
@@ -144,52 +143,45 @@ class UserController extends Controller
                     'postal_code' => $user->postal_code,
                     'country' => $user->country,
                     'created_at' => $user->created_at->toISOString(),
-                ],
+                ]
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'User not found',
-                'error' => $e->getMessage(),
+                'error' => $e->getMessage()
             ], 404);
         }
     }
 
     /**
-     * Update user role or is_active fields
+     * Update user status
      */
-    public function update(Request $request, $id)
+    public function updateStatus(Request $request, $id)
     {
         try {
             $user = User::findOrFail($id);
 
-            // Validate incoming request
             $validated = $request->validate([
-                'role' => 'sometimes|string|in:admin,lender,borrower',
-                'is_active' => 'sometimes|boolean',
+                'status' => 'required|in:approved,pending'
             ]);
 
-            // Update fields if provided
-            $updateData = [];
-            if (isset($validated['role'])) {
-                $updateData['role'] = $validated['role'];
-            }
-            if (isset($validated['is_active'])) {
-                $updateData['is_active'] = $validated['is_active'];
-            }
-
-            if (! empty($updateData)) {
-                $user->update($updateData);
-            }
+            $user->update([
+                'is_active' => $validated['status'] === 'approved',
+            ]);
 
             return response()->json([
-                'message' => 'User updated successfully',
-                'user' => $user,
+                'message' => 'User status updated successfully',
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'status' => $user->is_active ? 'approved' : 'pending',
+                ]
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Error updating user',
-                'error' => $e->getMessage(),
+                'message' => 'Error updating user status',
+                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -209,8 +201,9 @@ class UserController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Error deleting user',
-                'error' => $e->getMessage(),
+                'error' => $e->getMessage()
             ], 500);
         }
     }
 }
+
