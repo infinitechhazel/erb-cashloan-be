@@ -9,6 +9,7 @@ use App\Http\Controllers\LoanOfficerController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\PaymentSchedulePDFController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -67,8 +68,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Update wallet info (for lender/admin)
     Route::post('/loans/{loan}/wallet', [LoanController::class, 'updateWalletInfo']);
-   
-   
+
+
     // ========================================
     // PAYMENT ROUTES - Organized by user type
     // ========================================
@@ -128,4 +129,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/update-contact', [SettingsController::class, 'updateContact']);
         Route::put('/change-password', [SettingsController::class, 'changePassword']);
     });
+});
+
+Route::middleware('auth:sanctum')->group(function () {
+    // ... other routes ...
+    
+    Route::get('/loans/{id}/export-pdf', [PaymentSchedulePDFController::class, 'exportPaymentSchedulePDF']);
 });
