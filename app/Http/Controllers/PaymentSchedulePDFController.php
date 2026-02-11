@@ -14,89 +14,53 @@ class PaymentSchedulePDFController extends Controller
     /**
      * Export payment schedule as PDF
      */
-    public function exportPaymentSchedulePDF($loanId)
+    public function exportPaymentSchedulePDF(Loan $loan)
     {
         try {
-            // Get authenticated user
-            $user = auth()->user();
+            // Get the loan with relationships - borrower and lender ARE users
+            $loan->load(['borrower', 'lender']);
             
-            if (!$user) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Unauthorized'
-                ], 401);
-            }
-
-            // Fetch the loan (ensure it belongs to the user if not admin)
-            $loan = Loan::where('id', $loanId);
-            
-            // If not admin, only show user's own loans
-            if ($user->role !== 'admin') {
-                $loan = $loan->where('user_id', $user->id);
-            }
-            
-            $loan = $loan->firstOrFail();
-
-            // Fetch all payments for this loan
-            $payments = Payment::where('loan_id', $loanId)
+            // Get payment schedule from database
+            $payments = $loan->payments()
                 ->orderBy('payment_number', 'asc')
                 ->get();
 
-            // If no payments exist in database, generate them
+            // If no payments in database, generate them
             if ($payments->isEmpty()) {
                 $payments = $this->generatePaymentSchedule($loan);
             }
 
-            // Calculate statistics
-            $stats = [
-                'total' => $payments->count(),
-                'paid' => $payments->where('status', 'paid')->count(),
-                'pending' => $payments->where('status', 'pending')->count(),
-                'overdue' => $payments->where('status', 'overdue')->count(),
-                'missed' => $payments->where('status', 'missed')->count(),
-                'total_paid_amount' => $payments->where('status', 'paid')->sum('amount'),
-                'outstanding_balance' => $payments->whereIn('status', ['pending', 'overdue', 'missed'])->sum('amount'),
-            ];
-
-            // Prepare data for PDF
-            $data = [
-                'loan' => $loan,
-                'payments' => $payments,
-                'stats' => $stats,
-                'date' => now()->format('F d, Y'),
-                'time' => now()->format('h:i A'),
-                'generatedDateTime' => now()->format('F d, Y g:i A'),
-            ];
+            // Calculate summary
+            $paidPayments = $payments->where('status', 'paid')->count();
+            $pendingPayments = $payments->where('status', 'pending')->count();
+            $overduePayments = $payments->where('status', 'overdue')->count();
+            $missedPayments = $payments->where('status', 'missed')->count();
 
             // Generate PDF
-            $pdf = Pdf::loadView('pdf.payment-schedule-report', $data)
-                ->setPaper('a4', 'portrait')
-                ->setOption('margin-top', 15)
-                ->setOption('margin-bottom', 15)
-                ->setOption('margin-left', 15)
-                ->setOption('margin-right', 15);
-
-            // Download PDF
-            return $pdf->download('loan-' . $loan->loan_number . '-payment-schedule-' . now()->format('Y-m-d') . '.pdf');
-
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            Log::error('Loan not found for PDF generation', [
-                'loan_id' => $loanId,
-                'user_id' => auth()->id(),
+            $pdf = Pdf::loadView('pdf.payment-schedule', [
+                'loan' => $loan,
+                'payments' => $payments,
+                'summary' => [
+                    'paid' => $paidPayments,
+                    'pending' => $pendingPayments,
+                    'overdue' => $overduePayments,
+                    'missed' => $missedPayments,
+                ],
             ]);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Loan not found'
-            ], 404);
+            // Set paper size and orientation
+            $pdf->setPaper('a4', 'portrait');
 
+            // Return PDF download
+            return $pdf->download("loan-{$loan->id}-payment-schedule.pdf");
+            
         } catch (\Exception $e) {
-            Log::error('Error generating payment schedule PDF', [
-                'loan_id' => $loanId,
+            Log::error('PDF Generation Error', [
+                'loan_id' => $loan->id ?? 'unknown',
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-
+            
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to generate PDF',
@@ -107,41 +71,85 @@ class PaymentSchedulePDFController extends Controller
 
     /**
      * Generate payment schedule if not in database
+     * Matches the frontend logic exactly
      */
     private function generatePaymentSchedule($loan)
     {
-        $monthlyPayment = $loan->monthly_payment ?? 
+        Log::info('=== GENERATING PAYMENT SCHEDULE ===', [
+            'loan_id' => $loan->id,
+            'term_months' => $loan->term_months
+        ]);
+
+        $monthlyPayment = $loan->monthly_payment ??
             ($loan->amount / $loan->term_months);
 
-        $startDate = $loan->disbursement_date 
+        Log::info('Monthly payment calculated', [
+            'monthly_payment' => $monthlyPayment,
+            'loan_amount' => $loan->amount,
+            'term_months' => $loan->term_months
+        ]);
+
+        // Start from disbursement date or fallback to current date
+        $today = Carbon::now();
+        $startDate = $loan->disbursement_date
             ? Carbon::parse($loan->disbursement_date)
-            : Carbon::now();
+            : Carbon::create($today->year, $today->month, 1);
+
+        Log::info('Start date determined', [
+            'start_date' => $startDate->toDateString(),
+            'today' => $today->toDateString(),
+            'using_disbursement_date' => !is_null($loan->disbursement_date)
+        ]);
 
         $payments = collect();
-        $today = Carbon::now();
 
-        for ($i = 1; $i <= $loan->term_months; $i++) {
-            $dueDate = (clone $startDate)->addMonths($i);
+        // Generate consecutive months starting from disbursement/start date
+        for ($i = 0; $i < $loan->term_months; $i++) {
+            // Calculate due date for this payment (end of month, i months after start)
+            $dueDate = Carbon::create(
+                $startDate->year,
+                $startDate->month,
+                1
+            )->addMonths($i + 1)->subDay(); // Last day of the payment month
 
-            // Determine status
+            // Determine payment status
             $status = 'pending';
-            if ($dueDate->lt($today)) {
-                $daysPast = $today->diffInDays($dueDate);
+            $todayMidnight = Carbon::create($today->year, $today->month, $today->day);
+            $dueDateMidnight = Carbon::create($dueDate->year, $dueDate->month, $dueDate->day);
+
+            if ($dueDateMidnight->lt($todayMidnight)) {
+                // Past due date - check if it should be marked as overdue or missed
+                $daysPast = $todayMidnight->diffInDays($dueDateMidnight);
                 $status = $daysPast > 30 ? 'missed' : 'overdue';
             }
 
             $payment = (object) [
-                'id' => $loan->id * 1000 + $i,
+                'id' => $loan->id * 1000 + ($i + 1),
                 'loan_id' => $loan->id,
                 'amount' => number_format($monthlyPayment, 2, '.', ''),
                 'due_date' => $dueDate->toDateString(),
                 'paid_date' => null,
                 'status' => $status,
-                'payment_number' => $i,
+                'payment_number' => $i + 1,
             ];
 
             $payments->push($payment);
+
+            // Log first, last, and every 6th payment for reference
+            if ($i === 0 || $i === $loan->term_months - 1 || $i % 6 === 0) {
+                Log::info('Payment generated', [
+                    'payment_number' => $i + 1,
+                    'due_date' => $dueDate->toDateString(),
+                    'amount' => $payment->amount,
+                    'status' => $status
+                ]);
+            }
         }
+
+        Log::info('=== PAYMENT SCHEDULE GENERATION COMPLETED ===', [
+            'total_payments_generated' => $payments->count(),
+            'expected_payments' => $loan->term_months
+        ]);
 
         return $payments;
     }

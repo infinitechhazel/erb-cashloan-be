@@ -9,6 +9,7 @@ use App\Http\Controllers\LoanOfficerController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\PaymentSchedulePDFController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -119,7 +120,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments/{payment}', [PaymentController::class, 'show']);
     Route::get('/payments/{payment}/proof/download', [PaymentController::class, 'downloadProof']);
     Route::get('/payments/borrowers/', [PaymentController::class, 'indexByBorrower']);
-    Route::get('/loans/{loanId}/payment-schedule/export-pdf', [PaymentSchedulePDFController::class, 'exportPaymentSchedulePDF']);
 
     // User profile routes
     Route::prefix('settings')->group(function () {
@@ -129,4 +129,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/update-contact', [SettingsController::class, 'updateContact']);
         Route::put('/change-password', [SettingsController::class, 'changePassword']);
     });
+});
+
+Route::middleware('auth:sanctum')->group(function () {
+    // ... other routes ...
+    
+    Route::get('/loans/{id}/export-pdf', [PaymentSchedulePDFController::class, 'exportPaymentSchedulePDF']);
 });
